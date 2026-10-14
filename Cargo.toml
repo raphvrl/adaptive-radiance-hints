@@ -1,0 +1,21 @@
+[package]
+name = "adaptive-radiance-hints"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+winit = "0.30.13"
+
+wgpu = "30.0.1"
+pollster = "1.0.1"
+
+tracing = "0.1.44"
+tracing-subscriber = {version = "0.3.23", features = ["env-filter"]}
+
+encase = "0.13.0"
+glam = { version = "0.34.1", features = ["encase-013"] }
+
+[dependencies.image]
+version = "0.25.10"
+default-features = false
+features = ["hdr", "png", "jpeg"]
