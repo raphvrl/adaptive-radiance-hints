@@ -1,3 +1,19 @@
-fn main() {
-    println!("Hello, world!");
+mod app;
+mod gpu;
+mod renderer;
+mod state;
+
+fn main() -> std::process::ExitCode {
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+
+    tracing_subscriber::fmt().with_env_filter(filter).init();
+
+    match app::run() {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(error) => {
+            tracing::error!("{error:#}");
+            std::process::ExitCode::FAILURE
+        }
+    }
 }
