@@ -94,6 +94,10 @@ impl Gpu {
         &self.queue
     }
 
+    pub(crate) fn surface_format(&self) -> wgpu::TextureFormat {
+        self.config.format
+    }
+
     pub(crate) fn resize(&mut self, size: PhysicalSize<u32>) {
         if size.width == 0 || size.height == 0 {
             self.surface_configured = false;

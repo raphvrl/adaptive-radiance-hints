@@ -1,8 +1,16 @@
-pub(crate) struct Renderer;
+mod passes;
+
+use passes::triangle::TrianglePass;
+
+pub(crate) struct Renderer {
+    triangle: TrianglePass,
+}
 
 impl Renderer {
-    pub(crate) fn new() -> Self {
-        Self
+    pub(crate) fn new(device: &wgpu::Device, target_format: wgpu::TextureFormat) -> Self {
+        Self {
+            triangle: TrianglePass::new(device, target_format),
+        }
     }
 
     pub(crate) fn render(
@@ -15,29 +23,7 @@ impl Renderer {
             label: Some("Render encoder"),
         });
 
-        {
-            let _render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Clear pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.02,
-                            g: 0.025,
-                            b: 0.04,
-                            a: 1.0,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                occlusion_query_set: None,
-                timestamp_writes: None,
-                multiview_mask: None,
-            });
-        }
+        self.triangle.encode(&mut encoder, view);
 
         queue.submit([encoder.finish()]);
     }

@@ -15,7 +15,7 @@ impl State {
     pub async fn new(window: Arc<Window>) -> Result<Self> {
         let gpu = Gpu::new(Arc::clone(&window)).await?;
 
-        let renderer = Renderer::new();
+        let renderer = Renderer::new(gpu.device(), gpu.surface_format());
 
         Ok(Self {
             window,
