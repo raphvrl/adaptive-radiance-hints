@@ -17,6 +17,8 @@ glam = { version = "0.34.1", features = ["encase-013"] }
 
 anyhow = "1.0.104"
 
+wesl-core = "0.1.0"
+
 [dependencies.image]
 version = "0.25.10"
 default-features = false

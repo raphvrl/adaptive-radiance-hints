@@ -1,3 +1,5 @@
+use wesl_core::include_wesl;
+
 pub(crate) struct TrianglePass {
     pipeline: wgpu::RenderPipeline,
 }
@@ -6,9 +8,7 @@ impl TrianglePass {
     pub(crate) fn new(device: &wgpu::Device, target_format: wgpu::TextureFormat) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Triangle shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!(concat!(env!("OUT_DIR"), "/triangle.wgsl")).into(),
-            ),
+            source: wgpu::ShaderSource::Wgsl(include_wesl!("triangle").into()),
         });
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {

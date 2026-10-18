@@ -30,6 +30,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "wesl",
+ "wesl-core",
  "wgpu",
  "winit",
 ]
