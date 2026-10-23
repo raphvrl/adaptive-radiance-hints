@@ -1,6 +1,9 @@
 mod app;
+mod clock;
 mod gpu;
+mod input;
 mod renderer;
+mod scene;
 mod state;
 
 fn main() -> std::process::ExitCode {

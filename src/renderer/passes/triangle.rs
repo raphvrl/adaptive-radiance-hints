@@ -1,19 +1,30 @@
 use wesl_core::include_wesl;
 
-pub(crate) struct TrianglePass {
+pub struct TrianglePass {
     pipeline: wgpu::RenderPipeline,
 }
 
 impl TrianglePass {
-    pub(crate) fn new(device: &wgpu::Device, target_format: wgpu::TextureFormat) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        target_format: wgpu::TextureFormat,
+        frame_layout: &wgpu::BindGroupLayout,
+    ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Triangle shader"),
             source: wgpu::ShaderSource::Wgsl(include_wesl!("triangle").into()),
         });
 
+        let bind_group_layouts = [Some(frame_layout)];
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Triangle pipeline layout"),
+            bind_group_layouts: &bind_group_layouts,
+            immediate_size: 0,
+        });
+
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Triangle pipeline"),
-            layout: None,
+            layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: None,
@@ -40,7 +51,12 @@ impl TrianglePass {
         Self { pipeline }
     }
 
-    pub(crate) fn encode(&self, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView) {
+    pub fn encode(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        frame_bind_group: &wgpu::BindGroup,
+    ) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Triangle pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -64,6 +80,7 @@ impl TrianglePass {
         });
 
         pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(0, frame_bind_group, &[]);
         pass.draw(0..3, 0..1);
     }
 }

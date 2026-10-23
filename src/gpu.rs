@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result, bail};
 use winit::{dpi::PhysicalSize, window::Window};
 
-pub(crate) struct Gpu {
+pub struct Gpu {
     instance: wgpu::Instance,
     window: Arc<Window>,
     surface: wgpu::Surface<'static>,
@@ -14,7 +14,7 @@ pub(crate) struct Gpu {
 }
 
 impl Gpu {
-    pub(crate) async fn new(window: Arc<Window>) -> Result<Self> {
+    pub async fn new(window: Arc<Window>) -> Result<Self> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
         let surface = instance
             .create_surface(Arc::clone(&window))
@@ -49,11 +49,18 @@ impl Gpu {
             .or_else(|| capabilities.formats.first())
             .copied()
             .context("surface has no supported texture formats")?;
+
         let alpha_mode = capabilities
             .alpha_modes
             .first()
             .copied()
             .context("surface has no supported alpha modes")?;
+
+        let present_mode = wgpu::PresentMode::Immediate;
+
+        if !capabilities.present_modes.contains(&present_mode) {
+            bail!("surface does not support immediate presentation");
+        }
 
         let size = window.inner_size();
         let config = wgpu::SurfaceConfiguration {
@@ -62,11 +69,12 @@ impl Gpu {
             color_space: wgpu::SurfaceColorSpace::Auto,
             width: size.width.max(1),
             height: size.height.max(1),
-            present_mode: wgpu::PresentMode::AutoVsync,
+            present_mode,
             desired_maximum_frame_latency: 2,
             alpha_mode,
             view_formats: vec![],
         };
+
         let surface_configured = size.width > 0 && size.height > 0;
 
         if surface_configured {
@@ -86,19 +94,19 @@ impl Gpu {
         })
     }
 
-    pub(crate) fn device(&self) -> &wgpu::Device {
+    pub fn device(&self) -> &wgpu::Device {
         &self.device
     }
 
-    pub(crate) fn queue(&self) -> &wgpu::Queue {
+    pub fn queue(&self) -> &wgpu::Queue {
         &self.queue
     }
 
-    pub(crate) fn surface_format(&self) -> wgpu::TextureFormat {
+    pub fn surface_format(&self) -> wgpu::TextureFormat {
         self.config.format
     }
 
-    pub(crate) fn resize(&mut self, size: PhysicalSize<u32>) {
+    pub fn resize(&mut self, size: PhysicalSize<u32>) {
         if size.width == 0 || size.height == 0 {
             self.surface_configured = false;
             return;
@@ -110,7 +118,7 @@ impl Gpu {
         self.surface_configured = true;
     }
 
-    pub(crate) fn acquire_frame(&mut self) -> Result<Option<(wgpu::SurfaceTexture, bool)>> {
+    pub fn acquire_frame(&mut self) -> Result<Option<(wgpu::SurfaceTexture, bool)>> {
         if !self.surface_configured {
             return Ok(None);
         }
@@ -134,7 +142,7 @@ impl Gpu {
         }
     }
 
-    pub(crate) fn present(&mut self, frame: wgpu::SurfaceTexture, suboptimal: bool) {
+    pub fn present(&mut self, frame: wgpu::SurfaceTexture, suboptimal: bool) {
         self.queue.present(frame);
 
         if suboptimal {

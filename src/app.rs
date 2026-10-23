@@ -1,14 +1,16 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use glam::Vec2;
 use winit::{
     application::ApplicationHandler,
-    event::WindowEvent,
-    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+    event::{DeviceEvent, DeviceId, ElementState, WindowEvent},
+    event_loop::{ActiveEventLoop, ControlFlow, DeviceEvents, EventLoop},
+    keyboard::PhysicalKey,
     window::{Window, WindowId},
 };
 
-use crate::state::State;
+use crate::{input::InputButton, state::State};
 
 #[derive(Default)]
 pub struct App {
@@ -21,6 +23,8 @@ impl ApplicationHandler for App {
         if self.state.is_some() || self.error.is_some() {
             return;
         }
+
+        event_loop.listen_device_events(DeviceEvents::WhenFocused);
 
         let window_attributes = Window::default_attributes().with_title("Adaptive Radiance Hints");
 
@@ -35,7 +39,7 @@ impl ApplicationHandler for App {
 
         match pollster::block_on(State::new(window)) {
             Ok(state) => {
-                state.window().request_redraw();
+                state.request_redraw();
                 self.state = Some(state);
             }
             Err(error) => {
@@ -55,23 +59,55 @@ impl ApplicationHandler for App {
             return;
         };
 
-        if state.window().id() != window_id {
+        if state.window_id() != window_id {
             return;
         }
 
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
-            WindowEvent::Resized(size) => {
-                state.resize(size);
-                state.window().request_redraw();
+            WindowEvent::Focused(false) => state.clear_input(),
+            WindowEvent::KeyboardInput { event, .. } => {
+                if let PhysicalKey::Code(key) = event.physical_key {
+                    state.set_input_button(
+                        InputButton::Key(key),
+                        event.state == ElementState::Pressed,
+                    );
+                }
             }
+            WindowEvent::MouseInput {
+                state: button_state,
+                button,
+                ..
+            } => {
+                state.set_input_button(
+                    InputButton::Mouse(button),
+                    button_state == ElementState::Pressed,
+                );
+            }
+            WindowEvent::Resized(size) => state.resize(size),
             WindowEvent::RedrawRequested => {
+                state.update();
                 if let Err(error) = state.render() {
                     self.error = Some(error.context("failed to render frame"));
                     event_loop.exit();
                 }
             }
             _ => {}
+        }
+    }
+
+    fn device_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        _device_id: DeviceId,
+        event: DeviceEvent,
+    ) {
+        let Some(state) = self.state.as_mut() else {
+            return;
+        };
+
+        if let DeviceEvent::MouseMotion { delta: (dx, dy) } = event {
+            state.add_mouse_delta(Vec2::new(dx as f32, dy as f32));
         }
     }
 }

@@ -19,6 +19,8 @@ anyhow = "1.0.104"
 
 wesl-core = "0.1.0"
 
+hecs = "0.11.2"
+
 [dependencies.image]
 version = "0.25.10"
 default-features = false
