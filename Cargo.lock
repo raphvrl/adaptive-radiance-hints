@@ -23,6 +23,7 @@ name = "adaptive-radiance-hints"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bytemuck",
  "encase",
  "glam",
  "hecs",

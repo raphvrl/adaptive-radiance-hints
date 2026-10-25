@@ -6,8 +6,8 @@ use glam::Mat4;
 use wgpu::util::DeviceExt;
 
 #[derive(ShaderType)]
-pub(in crate::renderer) struct FrameUniform {
-    pub(in crate::renderer) view_proj: Mat4,
+pub struct FrameUniform {
+    pub view_proj: Mat4,
 }
 
 impl Default for FrameUniform {
@@ -18,14 +18,14 @@ impl Default for FrameUniform {
     }
 }
 
-pub(in crate::renderer) struct FrameBindings {
+pub struct FrameBindings {
     layout: wgpu::BindGroupLayout,
     buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
 }
 
 impl FrameBindings {
-    pub(in crate::renderer) fn new(device: &wgpu::Device) -> Result<Self> {
+    pub fn new(device: &wgpu::Device) -> Result<Self> {
         let initial_contents: Vec<u8> =
             UniformBuffer::<Vec<u8>>::content_of(&FrameUniform::default())?;
 
@@ -65,19 +65,15 @@ impl FrameBindings {
         })
     }
 
-    pub(in crate::renderer) fn layout(&self) -> &wgpu::BindGroupLayout {
+    pub fn layout(&self) -> &wgpu::BindGroupLayout {
         &self.layout
     }
 
-    pub(in crate::renderer) fn bind_group(&self) -> &wgpu::BindGroup {
+    pub fn bind_group(&self) -> &wgpu::BindGroup {
         &self.bind_group
     }
 
-    pub(in crate::renderer) fn write(
-        &self,
-        queue: &wgpu::Queue,
-        frame: &FrameUniform,
-    ) -> Result<()> {
+    pub fn write(&self, queue: &wgpu::Queue, frame: &FrameUniform) -> Result<()> {
         let contents: Vec<u8> = UniformBuffer::<Vec<u8>>::content_of(frame)?;
         queue.write_buffer(&self.buffer, 0, &contents);
         Ok(())

@@ -1,22 +1,42 @@
 mod bindings;
+mod depth;
+mod mesh;
+mod meshes;
 mod passes;
 
 use anyhow::Result;
-use bindings::frame::{FrameBindings, FrameUniform};
 use glam::Mat4;
-use passes::triangle::TrianglePass;
+
+use bindings::frame::{FrameBindings, FrameUniform};
+use depth::DepthTarget;
+use passes::geometry::GeometryPass;
 
 pub struct Renderer {
     frame: FrameBindings,
-    triangle: TrianglePass,
+    geometry: GeometryPass,
+    depth: DepthTarget,
 }
 
 impl Renderer {
-    pub fn new(device: &wgpu::Device, target_format: wgpu::TextureFormat) -> Result<Self> {
+    pub fn new(
+        device: &wgpu::Device,
+        target_format: wgpu::TextureFormat,
+        width: u32,
+        height: u32,
+    ) -> Result<Self> {
         let frame = FrameBindings::new(device)?;
-        let triangle = TrianglePass::new(device, target_format, frame.layout());
+        let geometry = GeometryPass::new(device, target_format, frame.layout());
+        let depth = DepthTarget::new(device, width, height);
 
-        Ok(Self { frame, triangle })
+        Ok(Self {
+            frame,
+            geometry,
+            depth,
+        })
+    }
+
+    pub fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {
+        self.depth.resize(device, width, height);
     }
 
     pub fn render(
@@ -32,8 +52,12 @@ impl Renderer {
             label: Some("Render encoder"),
         });
 
-        self.triangle
-            .encode(&mut encoder, view, self.frame.bind_group());
+        self.geometry.encode(
+            &mut encoder,
+            view,
+            self.depth.view(),
+            self.frame.bind_group(),
+        );
 
         queue.submit([encoder.finish()]);
 

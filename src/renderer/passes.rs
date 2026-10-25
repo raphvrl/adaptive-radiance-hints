@@ -1,1 +1,1 @@
-pub(super) mod triangle;
+pub mod geometry;

@@ -32,7 +32,8 @@ impl State {
         let clock = Clock::default();
 
         let scene = Scene::new();
-        let renderer = Renderer::new(gpu.device(), gpu.surface_format())?;
+        let size = window.inner_size();
+        let renderer = Renderer::new(gpu.device(), gpu.surface_format(), size.width, size.height)?;
 
         Ok(Self {
             window,
@@ -83,6 +84,8 @@ impl State {
 
     pub fn resize(&mut self, size: PhysicalSize<u32>) {
         self.gpu.resize(size);
+        self.renderer
+            .resize(self.gpu.device(), size.width, size.height);
         self.request_redraw();
     }
 

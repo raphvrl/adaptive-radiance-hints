@@ -1,1 +1,1 @@
-pub(super) mod frame;
+pub mod frame;

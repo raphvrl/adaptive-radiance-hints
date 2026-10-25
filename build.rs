@@ -1,7 +1,7 @@
 use std::{error::Error, path::PathBuf};
 
 fn main() -> Result<(), Box<dyn Error>> {
-    compile_shader("src/shaders/triangle.wesl", "triangle.wgsl")?;
+    compile_shader("src/shaders/geometry.wesl", "geometry.wgsl")?;
 
     Ok(())
 }
