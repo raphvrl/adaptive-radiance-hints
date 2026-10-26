@@ -15,6 +15,7 @@ pub fn show(root_ui: &mut egui::Ui) -> bool {
                     ui.label("WASD / arrows: move");
                     ui.label("Space / left Shift: move vertically");
                     ui.label("Right mouse + move: look");
+                    ui.label("Left mouse: select block");
                 });
             });
         });

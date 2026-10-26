@@ -2,11 +2,11 @@
 pub struct MeshHandle(u32);
 
 impl MeshHandle {
-    pub(crate) const fn from_index(index: u32) -> Self {
+    pub const fn from_index(index: u32) -> Self {
         Self(index)
     }
 
-    pub(crate) const fn index(self) -> usize {
+    pub const fn index(self) -> usize {
         self.0 as usize
     }
 }

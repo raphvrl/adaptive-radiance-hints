@@ -2,25 +2,26 @@ mod assets;
 mod bindings;
 mod depth;
 mod instances;
-pub(crate) mod mesh;
-pub(crate) mod meshes;
+pub mod mesh;
+pub mod meshes;
 mod passes;
 
 use anyhow::Result;
 use glam::Mat4;
 
-use crate::handle::MeshHandle;
+use crate::{handle::MeshHandle, scene::MeshInstance};
 
 use assets::MeshAssets;
 use bindings::frame::{FrameBindings, FrameUniform};
 use depth::DepthTarget;
 use instances::InstanceBuffer;
 use mesh::MeshData;
-use passes::geometry::GeometryPass;
+use passes::{geometry::GeometryPass, selection::SelectionPass};
 
 pub struct Renderer {
     frame: FrameBindings,
     geometry: GeometryPass,
+    selection: SelectionPass,
     depth: DepthTarget,
     assets: MeshAssets,
     instances: InstanceBuffer,
@@ -35,23 +36,21 @@ impl Renderer {
     ) -> Result<Self> {
         let frame = FrameBindings::new(device)?;
         let geometry = GeometryPass::new(device, target_format, frame.layout());
+        let selection = SelectionPass::new(device, target_format, frame.layout());
         let depth = DepthTarget::new(device, width, height);
         let instances = InstanceBuffer::new(device)?;
 
         Ok(Self {
             frame,
             geometry,
+            selection,
             depth,
             assets: MeshAssets::default(),
             instances,
         })
     }
 
-    pub(crate) fn register_mesh(
-        &mut self,
-        device: &wgpu::Device,
-        data: &MeshData,
-    ) -> Result<MeshHandle> {
+    pub fn register_mesh(&mut self, device: &wgpu::Device, data: &MeshData) -> Result<MeshHandle> {
         self.assets.insert(device, data)
     }
 
@@ -66,10 +65,13 @@ impl Renderer {
         encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
         view_proj: Mat4,
-        renderables: &[(MeshHandle, Mat4)],
+        renderables: &[MeshInstance],
     ) -> Result<()> {
         self.frame.write(queue, &FrameUniform { view_proj })?;
         let batches = self.instances.write(device, queue, renderables)?;
+        let selected_model = renderables
+            .iter()
+            .find_map(|instance| instance.selected.then_some(instance.model));
 
         self.geometry.encode(
             encoder,
@@ -80,6 +82,15 @@ impl Renderer {
             &self.instances,
             &batches,
         )?;
+
+        self.selection.encode(
+            queue,
+            encoder,
+            view,
+            self.depth.view(),
+            self.frame.bind_group(),
+            selected_model,
+        );
 
         Ok(())
     }

@@ -50,6 +50,7 @@ pub enum InputButton {
 pub struct Input {
     down_buttons: HashSet<InputButton>,
     mouse_delta: Vec2,
+    cursor_position: Option<Vec2>,
 }
 
 impl Input {
@@ -92,6 +93,14 @@ impl Input {
 
     pub fn mouse_delta(&self) -> Vec2 {
         self.mouse_delta
+    }
+
+    pub fn set_cursor_position(&mut self, position: Vec2) {
+        self.cursor_position = Some(position);
+    }
+
+    pub fn cursor_position(&self) -> Option<Vec2> {
+        self.cursor_position
     }
 
     pub fn end_frame(&mut self) {

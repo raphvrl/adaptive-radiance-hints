@@ -93,7 +93,7 @@ impl GeometryPass {
                 view: depth,
                 depth_ops: Some(wgpu::Operations {
                     load: wgpu::LoadOp::Clear(1.0),
-                    store: wgpu::StoreOp::Discard,
+                    store: wgpu::StoreOp::Store,
                 }),
                 stencil_ops: None,
             }),

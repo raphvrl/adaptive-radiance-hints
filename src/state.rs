@@ -2,9 +2,10 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use glam::Vec2;
+use hecs::Entity;
 use winit::{
     dpi::PhysicalSize,
-    event::WindowEvent,
+    event::{MouseButton, WindowEvent},
     window::{Window, WindowId},
 };
 
@@ -13,7 +14,7 @@ use crate::{
     gpu::Gpu,
     input::{Input, InputButton},
     renderer::Renderer,
-    scene::Scene,
+    scene::{Scene, picking},
     ui::{Ui, UiResponse},
 };
 
@@ -23,6 +24,7 @@ pub struct State {
     input: Input,
     clock: Clock,
     scene: Scene,
+    selected_entity: Option<Entity>,
     renderer: Renderer,
     ui: Ui,
 }
@@ -37,8 +39,11 @@ impl State {
         let size = window.inner_size();
         let mut renderer =
             Renderer::new(gpu.device(), gpu.surface_format(), size.width, size.height)?;
+
         let cube_mesh = renderer.register_mesh(gpu.device(), &crate::renderer::meshes::cube())?;
+
         let scene = Scene::new(cube_mesh);
+
         let ui = Ui::new(&window, gpu.device(), gpu.surface_format());
 
         Ok(Self {
@@ -47,6 +52,7 @@ impl State {
             input,
             clock,
             scene,
+            selected_entity: None,
             renderer,
             ui,
         })
@@ -63,6 +69,11 @@ impl State {
     pub fn handle_window_event(&mut self, event: &WindowEvent) -> egui_winit::EventResponse {
         let response = self.ui.on_window_event(&self.window, event);
 
+        if let WindowEvent::CursorMoved { position, .. } = event {
+            self.input
+                .set_cursor_position(Vec2::new(position.x as f32, position.y as f32));
+        }
+
         if response.repaint {
             self.request_redraw();
         }
@@ -76,6 +87,9 @@ impl State {
         }
 
         self.input.set_button(button, pressed);
+        if pressed && button == InputButton::Mouse(MouseButton::Left) {
+            self.select_at_cursor();
+        }
         self.request_redraw();
     }
 
@@ -116,7 +130,7 @@ impl State {
         let size = self.window.inner_size();
         let aspect_ratio = size.width as f32 / size.height as f32;
         let view_proj = self.scene.camera_view_projection(aspect_ratio)?;
-        let renderables = self.scene.mesh_instances();
+        let renderables = self.scene.mesh_instances(self.selected_entity);
 
         let view = frame
             .texture
@@ -161,5 +175,31 @@ impl State {
         }
 
         Ok(Some(ui_frame.response))
+    }
+
+    fn select_at_cursor(&mut self) {
+        if self.ui.wants_pointer_input() {
+            return;
+        }
+
+        self.selected_entity = self.entity_at_cursor();
+    }
+
+    fn entity_at_cursor(&self) -> Option<Entity> {
+        let cursor_position = self.input.cursor_position()?;
+        let size = self.window.inner_size();
+        let viewport = Vec2::new(size.width as f32, size.height as f32);
+
+        if viewport.x == 0.0 || viewport.y == 0.0 {
+            return None;
+        }
+
+        let view_proj = self
+            .scene
+            .camera_view_projection(viewport.x / viewport.y)
+            .ok()?;
+
+        let ray = picking::ray_from_cursor(cursor_position, viewport, view_proj)?;
+        self.scene.pick_entity(ray)
     }
 }

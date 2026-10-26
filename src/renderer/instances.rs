@@ -4,11 +4,11 @@ use anyhow::{Context, Result, ensure};
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat3, Mat4};
 
-use crate::handle::MeshHandle;
+use crate::{handle::MeshHandle, scene::MeshInstance};
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
-pub(super) struct InstanceRaw {
+pub struct InstanceRaw {
     model: [[f32; 4]; 4],
     normal: [[f32; 4]; 3],
 }
@@ -24,7 +24,7 @@ const ATTRIBUTES: [wgpu::VertexAttribute; 7] = wgpu::vertex_attr_array![
 ];
 
 impl InstanceRaw {
-    pub(super) const LAYOUT: wgpu::VertexBufferLayout<'static> = wgpu::VertexBufferLayout {
+    pub const LAYOUT: wgpu::VertexBufferLayout<'static> = wgpu::VertexBufferLayout {
         array_stride: std::mem::size_of::<Self>() as wgpu::BufferAddress,
         step_mode: wgpu::VertexStepMode::Instance,
         attributes: &ATTRIBUTES,
@@ -53,19 +53,19 @@ impl InstanceRaw {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(super) struct MeshBatch {
+pub struct MeshBatch {
     pub mesh: MeshHandle,
     pub first_instance: u32,
     pub instance_count: u32,
 }
 
-pub(super) struct InstanceBuffer {
+pub struct InstanceBuffer {
     buffer: wgpu::Buffer,
     capacity: usize,
 }
 
 impl InstanceBuffer {
-    pub(super) fn new(device: &wgpu::Device) -> Result<Self> {
+    pub fn new(device: &wgpu::Device) -> Result<Self> {
         let capacity = 1;
 
         Ok(Self {
@@ -74,18 +74,21 @@ impl InstanceBuffer {
         })
     }
 
-    pub(super) fn write(
+    pub fn write(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        renderables: &[(MeshHandle, Mat4)],
+        renderables: &[MeshInstance],
     ) -> Result<Vec<MeshBatch>> {
         u32::try_from(renderables.len()).context("too many mesh instances")?;
 
         let mut groups = BTreeMap::<MeshHandle, Vec<Mat4>>::new();
 
-        for &(mesh, model) in renderables {
-            groups.entry(mesh).or_default().push(model);
+        for instance in renderables {
+            groups
+                .entry(instance.mesh)
+                .or_default()
+                .push(instance.model);
         }
 
         let mut instances = Vec::with_capacity(renderables.len());
@@ -116,7 +119,7 @@ impl InstanceBuffer {
         Ok(batches)
     }
 
-    pub(super) fn buffer(&self) -> &wgpu::Buffer {
+    pub fn buffer(&self) -> &wgpu::Buffer {
         &self.buffer
     }
 
