@@ -22,6 +22,10 @@ wesl-core = "0.1.0"
 
 hecs = "0.11.2"
 
+egui = { version = "0.37.0", features = ["default_fonts"] }
+egui-wgpu = "0.37.0"
+egui-winit = "0.37.0"
+
 [dependencies.image]
 version = "0.25.10"
 default-features = false

@@ -4,6 +4,7 @@ use anyhow::Result;
 use glam::Vec2;
 use winit::{
     dpi::PhysicalSize,
+    event::WindowEvent,
     window::{Window, WindowId},
 };
 
@@ -13,6 +14,7 @@ use crate::{
     input::{Input, InputButton},
     renderer::Renderer,
     scene::Scene,
+    ui::{Ui, UiResponse},
 };
 
 pub struct State {
@@ -22,6 +24,7 @@ pub struct State {
     clock: Clock,
     scene: Scene,
     renderer: Renderer,
+    ui: Ui,
 }
 
 impl State {
@@ -34,6 +37,7 @@ impl State {
         let scene = Scene::new();
         let size = window.inner_size();
         let renderer = Renderer::new(gpu.device(), gpu.surface_format(), size.width, size.height)?;
+        let ui = Ui::new(&window, gpu.device(), gpu.surface_format());
 
         Ok(Self {
             window,
@@ -42,6 +46,7 @@ impl State {
             clock,
             scene,
             renderer,
+            ui,
         })
     }
 
@@ -51,6 +56,16 @@ impl State {
 
     pub fn request_redraw(&self) {
         self.window.request_redraw();
+    }
+
+    pub fn handle_window_event(&mut self, event: &WindowEvent) -> egui_winit::EventResponse {
+        let response = self.ui.on_window_event(&self.window, event);
+
+        if response.repaint {
+            self.request_redraw();
+        }
+
+        response
     }
 
     pub fn set_input_button(&mut self, button: InputButton, pressed: bool) {
@@ -68,8 +83,10 @@ impl State {
     }
 
     pub fn add_mouse_delta(&mut self, delta: Vec2) {
-        self.input.add_mouse_delta(delta);
-        self.request_redraw();
+        if !self.ui.wants_pointer_input() {
+            self.input.add_mouse_delta(delta);
+            self.request_redraw();
+        }
     }
 
     pub fn update(&mut self) {
@@ -89,9 +106,9 @@ impl State {
         self.request_redraw();
     }
 
-    pub fn render(&mut self) -> Result<()> {
+    pub fn render(&mut self) -> Result<Option<UiResponse>> {
         let Some((frame, suboptimal)) = self.gpu.acquire_frame()? else {
-            return Ok(());
+            return Ok(None);
         };
 
         let size = self.window.inner_size();
@@ -102,15 +119,38 @@ impl State {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        self.renderer
-            .render(self.gpu.device(), self.gpu.queue(), &view, view_proj)?;
+        let mut encoder =
+            self.gpu
+                .device()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Frame encoder"),
+                });
 
+        self.renderer
+            .encode(self.gpu.queue(), &mut encoder, &view, view_proj)?;
+
+        let mut ui_frame = self.ui.run(&self.window);
+        let callback_commands = self.ui.encode(
+            self.gpu.device(),
+            self.gpu.queue(),
+            &mut encoder,
+            &view,
+            size,
+            &mut ui_frame,
+        );
+
+        self.gpu.queue().submit(
+            callback_commands
+                .into_iter()
+                .chain(std::iter::once(encoder.finish())),
+        );
+        self.ui.free_textures(&mut ui_frame);
         self.gpu.present(frame, suboptimal);
 
         if self.input.has_active_actions() {
             self.request_redraw();
         }
 
-        Ok(())
+        Ok(Some(ui_frame.response))
     }
 }

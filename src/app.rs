@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use glam::Vec2;
 use winit::{
     application::ApplicationHandler,
-    event::{DeviceEvent, DeviceId, ElementState, WindowEvent},
+    event::{DeviceEvent, DeviceId, ElementState, StartCause, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, DeviceEvents, EventLoop},
     keyboard::PhysicalKey,
     window::{Window, WindowId},
@@ -19,6 +19,15 @@ pub struct App {
 }
 
 impl ApplicationHandler for App {
+    fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: StartCause) {
+        if let StartCause::ResumeTimeReached { .. } = cause {
+            event_loop.set_control_flow(ControlFlow::Wait);
+            if let Some(state) = &self.state {
+                state.request_redraw();
+            }
+        }
+    }
+
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.state.is_some() || self.error.is_some() {
             return;
@@ -63,33 +72,49 @@ impl ApplicationHandler for App {
             return;
         }
 
+        let ui_response = state.handle_window_event(&event);
+
+        let button_event = match &event {
+            WindowEvent::KeyboardInput { event, .. } => match event.physical_key {
+                PhysicalKey::Code(key) => Some((InputButton::Key(key), event.state)),
+                PhysicalKey::Unidentified(_) => None,
+            },
+            WindowEvent::MouseInput { button, state, .. } => {
+                Some((InputButton::Mouse(*button), *state))
+            }
+            _ => None,
+        };
+
+        if let Some((button, button_state)) = button_event
+            && (!ui_response.consumed || button_state == ElementState::Released)
+        {
+            state.set_input_button(button, button_state == ElementState::Pressed);
+        }
+
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Focused(false) => state.clear_input(),
-            WindowEvent::KeyboardInput { event, .. } => {
-                if let PhysicalKey::Code(key) = event.physical_key {
-                    state.set_input_button(
-                        InputButton::Key(key),
-                        event.state == ElementState::Pressed,
-                    );
-                }
-            }
-            WindowEvent::MouseInput {
-                state: button_state,
-                button,
-                ..
-            } => {
-                state.set_input_button(
-                    InputButton::Mouse(button),
-                    button_state == ElementState::Pressed,
-                );
-            }
             WindowEvent::Resized(size) => state.resize(size),
             WindowEvent::RedrawRequested => {
                 state.update();
-                if let Err(error) = state.render() {
-                    self.error = Some(error.context("failed to render frame"));
-                    event_loop.exit();
+                match state.render() {
+                    Ok(Some(response)) => {
+                        if response.quit_requested {
+                            event_loop.exit();
+                        } else if response.repaint_delay.is_zero() {
+                            event_loop.set_control_flow(ControlFlow::Wait);
+                            state.request_redraw();
+                        } else {
+                            event_loop.set_control_flow(ControlFlow::wait_duration(
+                                response.repaint_delay,
+                            ));
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        self.error = Some(error.context("failed to render frame"));
+                        event_loop.exit();
+                    }
                 }
             }
             _ => {}

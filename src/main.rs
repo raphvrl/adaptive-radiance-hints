@@ -5,6 +5,7 @@ mod input;
 mod renderer;
 mod scene;
 mod state;
+mod ui;
 
 fn main() -> std::process::ExitCode {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()

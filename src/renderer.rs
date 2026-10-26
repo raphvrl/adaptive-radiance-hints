@@ -39,27 +39,17 @@ impl Renderer {
         self.depth.resize(device, width, height);
     }
 
-    pub fn render(
+    pub fn encode(
         &self,
-        device: &wgpu::Device,
         queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
         view_proj: Mat4,
     ) -> Result<()> {
         self.frame.write(queue, &FrameUniform { view_proj })?;
 
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Render encoder"),
-        });
-
-        self.geometry.encode(
-            &mut encoder,
-            view,
-            self.depth.view(),
-            self.frame.bind_group(),
-        );
-
-        queue.submit([encoder.finish()]);
+        self.geometry
+            .encode(encoder, view, self.depth.view(), self.frame.bind_group());
 
         Ok(())
     }
