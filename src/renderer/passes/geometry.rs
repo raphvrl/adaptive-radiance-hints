@@ -1,13 +1,13 @@
 use wesl_core::include_wesl;
 
 use crate::renderer::{
-    mesh::{GpuMesh, MeshVertex},
-    meshes,
+    assets::MeshAssets,
+    instances::{InstanceBuffer, InstanceRaw, MeshBatch},
+    mesh::MeshVertex,
 };
 
 pub struct GeometryPass {
     pipeline: wgpu::RenderPipeline,
-    mesh: GpuMesh,
 }
 
 impl GeometryPass {
@@ -35,7 +35,7 @@ impl GeometryPass {
                 module: &shader,
                 entry_point: None,
                 compilation_options: Default::default(),
-                buffers: &[Some(MeshVertex::LAYOUT)],
+                buffers: &[Some(MeshVertex::LAYOUT), Some(InstanceRaw::LAYOUT)],
             },
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: Some(wgpu::DepthStencilState {
@@ -60,10 +60,7 @@ impl GeometryPass {
             cache: None,
         });
 
-        let mesh_data = meshes::cube();
-        let mesh = GpuMesh::upload(device, &mesh_data).expect("failed to upload mesh");
-
-        Self { pipeline, mesh }
+        Self { pipeline }
     }
 
     pub fn encode(
@@ -72,7 +69,10 @@ impl GeometryPass {
         target: &wgpu::TextureView,
         depth: &wgpu::TextureView,
         frame_bind_group: &wgpu::BindGroup,
-    ) {
+        assets: &MeshAssets,
+        instances: &InstanceBuffer,
+        batches: &[MeshBatch],
+    ) -> anyhow::Result<()> {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Geometry pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -104,11 +104,17 @@ impl GeometryPass {
 
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, frame_bind_group, &[]);
+        pass.set_vertex_buffer(1, instances.buffer().slice(..));
 
-        let mesh = &self.mesh;
+        for batch in batches {
+            let mesh = assets.get(batch.mesh)?;
+            let end_instance = batch.first_instance + batch.instance_count;
 
-        pass.set_vertex_buffer(0, mesh.vertex_buffer().slice(..));
-        pass.set_index_buffer(mesh.index_buffer().slice(..), wgpu::IndexFormat::Uint32);
-        pass.draw_indexed(0..mesh.index_count(), 0, 0..1);
+            pass.set_vertex_buffer(0, mesh.vertex_buffer().slice(..));
+            pass.set_index_buffer(mesh.index_buffer().slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..mesh.index_count(), 0, batch.first_instance..end_instance);
+        }
+
+        Ok(())
     }
 }

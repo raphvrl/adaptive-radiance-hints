@@ -2,10 +2,10 @@ pub mod components;
 pub mod systems;
 
 use anyhow::{Context, Result, ensure};
-use components::{Camera, Controller, Transform};
+use components::{Camera, Controller, Mesh, Transform};
 use glam::Mat4;
 
-use crate::input::Input;
+use crate::{handle::MeshHandle, input::Input};
 
 #[derive(Default)]
 pub struct Scene {
@@ -13,7 +13,7 @@ pub struct Scene {
 }
 
 impl Scene {
-    pub fn new() -> Self {
+    pub fn new(cube_mesh: MeshHandle) -> Self {
         let mut scene = Self::default();
 
         scene.world.spawn((
@@ -26,7 +26,34 @@ impl Scene {
             Transform::from_xyz(0.0, 0.0, 3.0),
         ));
 
+        scene.world.spawn((
+            Mesh { handle: cube_mesh },
+            Transform::from_xyz(-0.75, 0.0, 0.0),
+        ));
+
+        scene.world.spawn((
+            Mesh { handle: cube_mesh },
+            Transform::from_xyz(0.75, 0.0, 0.0),
+        ));
+
         scene
+    }
+
+    pub fn mesh_instances(&self) -> Vec<(MeshHandle, Mat4)> {
+        let mut query = self.world.query::<(&Mesh, &Transform)>();
+
+        query
+            .iter()
+            .map(|(mesh, transform)| {
+                let model = Mat4::from_scale_rotation_translation(
+                    transform.scale,
+                    transform.rotation,
+                    transform.translation,
+                );
+
+                (mesh.handle, model)
+            })
+            .collect()
     }
 
     pub fn update(&mut self, input: &Input, delta_time: f32) {

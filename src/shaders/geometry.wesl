@@ -10,6 +10,13 @@ var<uniform> frame: FrameUniform;
 struct VertexInput {
     @location(0) position: vec3f,
     @location(1) normal: vec3f,
+    @location(2) model_0: vec4f,
+    @location(3) model_1: vec4f,
+    @location(4) model_2: vec4f,
+    @location(5) model_3: vec4f,
+    @location(6) normal_0: vec4f,
+    @location(7) normal_1: vec4f,
+    @location(8) normal_2: vec4f,
 }
 
 struct VertexOutput {
@@ -20,8 +27,23 @@ struct VertexOutput {
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
-    output.position = frame.view_proj * vec4f(input.position, 1.0);
-    output.normal = input.normal;
+
+    let model = mat4x4<f32>(
+        input.model_0,
+        input.model_1,
+        input.model_2,
+        input.model_3,
+    );
+
+    let normal_matrix = mat3x3<f32>(
+        input.normal_0.xyz,
+        input.normal_1.xyz,
+        input.normal_2.xyz,
+    );
+
+    output.position = frame.view_proj * model * vec4f(input.position, 1.0);
+    output.normal = normal_matrix * input.normal;
+
     return output;
 }
 

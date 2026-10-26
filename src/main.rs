@@ -1,6 +1,7 @@
 mod app;
 mod clock;
 mod gpu;
+mod handle;
 mod input;
 mod renderer;
 mod scene;

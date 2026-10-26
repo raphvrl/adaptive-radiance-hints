@@ -34,9 +34,11 @@ impl State {
         let input = Input::default();
         let clock = Clock::default();
 
-        let scene = Scene::new();
         let size = window.inner_size();
-        let renderer = Renderer::new(gpu.device(), gpu.surface_format(), size.width, size.height)?;
+        let mut renderer =
+            Renderer::new(gpu.device(), gpu.surface_format(), size.width, size.height)?;
+        let cube_mesh = renderer.register_mesh(gpu.device(), &crate::renderer::meshes::cube())?;
+        let scene = Scene::new(cube_mesh);
         let ui = Ui::new(&window, gpu.device(), gpu.surface_format());
 
         Ok(Self {
@@ -114,6 +116,7 @@ impl State {
         let size = self.window.inner_size();
         let aspect_ratio = size.width as f32 / size.height as f32;
         let view_proj = self.scene.camera_view_projection(aspect_ratio)?;
+        let renderables = self.scene.mesh_instances();
 
         let view = frame
             .texture
@@ -126,8 +129,14 @@ impl State {
                     label: Some("Frame encoder"),
                 });
 
-        self.renderer
-            .encode(self.gpu.queue(), &mut encoder, &view, view_proj)?;
+        self.renderer.encode(
+            self.gpu.device(),
+            self.gpu.queue(),
+            &mut encoder,
+            &view,
+            view_proj,
+            &renderables,
+        )?;
 
         let mut ui_frame = self.ui.run(&self.window);
         let callback_commands = self.ui.encode(
