@@ -3,11 +3,13 @@ mod paint;
 
 use std::time::Duration;
 
+use crate::editor::TransformMode;
 use winit::{event::WindowEvent, window::Window};
 
 pub struct UiResponse {
     pub quit_requested: bool,
     pub repaint_delay: Duration,
+    pub transform_mode: Option<TransformMode>,
 }
 
 pub struct UiFrame {
@@ -56,12 +58,14 @@ impl Ui {
         self.context.egui_wants_pointer_input()
     }
 
-    pub fn run(&mut self, window: &Window) -> UiFrame {
+    pub fn run(&mut self, window: &Window, mode: TransformMode) -> UiFrame {
         let input = self.platform.take_egui_input(window);
 
-        let mut quit_requested = false;
+        let (mut quit_requested, mut transform_mode) = (false, None);
         let mut output = self.context.run_ui(input, |root_ui| {
-            quit_requested |= menu::show(root_ui);
+            let (quit, selected_mode) = menu::show(root_ui, mode);
+            quit_requested |= quit;
+            transform_mode = selected_mode;
         });
         self.platform
             .handle_platform_output(window, std::mem::take(&mut output.platform_output));
@@ -76,6 +80,7 @@ impl Ui {
             response: UiResponse {
                 quit_requested,
                 repaint_delay,
+                transform_mode,
             },
         }
     }

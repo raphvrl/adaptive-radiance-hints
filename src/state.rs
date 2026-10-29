@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use glam::Vec2;
-use hecs::Entity;
+use glam::{Mat4, Vec2};
 use winit::{
     dpi::PhysicalSize,
     event::{MouseButton, WindowEvent},
@@ -11,6 +10,7 @@ use winit::{
 
 use crate::{
     clock::Clock,
+    editor::EditorState,
     gpu::Gpu,
     input::{Input, InputButton},
     renderer::Renderer,
@@ -24,7 +24,7 @@ pub struct State {
     input: Input,
     clock: Clock,
     scene: Scene,
-    selected_entity: Option<Entity>,
+    editor: EditorState,
     renderer: Renderer,
     ui: Ui,
 }
@@ -52,7 +52,7 @@ impl State {
             input,
             clock,
             scene,
-            selected_entity: None,
+            editor: EditorState::default(),
             renderer,
             ui,
         })
@@ -70,8 +70,12 @@ impl State {
         let response = self.ui.on_window_event(&self.window, event);
 
         if let WindowEvent::CursorMoved { position, .. } = event {
-            self.input
-                .set_cursor_position(Vec2::new(position.x as f32, position.y as f32));
+            let cursor = Vec2::new(position.x as f32, position.y as f32);
+            self.input.set_cursor_position(cursor);
+            if self.editor.is_dragging() {
+                self.update_editor_drag(cursor);
+                self.request_redraw();
+            }
         }
 
         if response.repaint {
@@ -87,19 +91,22 @@ impl State {
         }
 
         self.input.set_button(button, pressed);
-        if pressed && button == InputButton::Mouse(MouseButton::Left) {
-            self.select_at_cursor();
+        match (button, pressed) {
+            (InputButton::Mouse(MouseButton::Left), true) => self.select_or_begin_drag(),
+            (InputButton::Mouse(MouseButton::Left), false) => self.editor.end_drag(),
+            _ => {}
         }
         self.request_redraw();
     }
 
     pub fn clear_input(&mut self) {
         self.input.clear();
+        self.editor.end_drag();
         self.request_redraw();
     }
 
     pub fn add_mouse_delta(&mut self, delta: Vec2) {
-        if !self.ui.wants_pointer_input() {
+        if !self.editor.is_dragging() && !self.ui.wants_pointer_input() {
             self.input.add_mouse_delta(delta);
             self.request_redraw();
         }
@@ -107,7 +114,9 @@ impl State {
 
     pub fn update(&mut self) {
         let delta = self.clock.tick();
-        self.scene.update(&self.input, delta);
+        if !self.editor.is_dragging() {
+            self.scene.update(&self.input, delta);
+        }
         self.input.end_frame();
 
         if !self.input.has_active_actions() {
@@ -130,7 +139,12 @@ impl State {
         let size = self.window.inner_size();
         let aspect_ratio = size.width as f32 / size.height as f32;
         let view_proj = self.scene.camera_view_projection(aspect_ratio)?;
-        let renderables = self.scene.mesh_instances(self.selected_entity);
+        let mut ui_frame = self.ui.run(&self.window, self.editor.mode());
+        if let Some(mode) = ui_frame.response.transform_mode {
+            self.editor.set_mode(mode);
+        }
+        let renderables = self.scene.mesh_instances(self.editor.selected_entity());
+        let gizmo_draw = self.editor.gizmo_draw(&self.scene, size.height as f32);
 
         let view = frame
             .texture
@@ -150,9 +164,9 @@ impl State {
             &view,
             view_proj,
             &renderables,
+            gizmo_draw,
         )?;
 
-        let mut ui_frame = self.ui.run(&self.window);
         let callback_commands = self.ui.encode(
             self.gpu.device(),
             self.gpu.queue(),
@@ -177,20 +191,45 @@ impl State {
         Ok(Some(ui_frame.response))
     }
 
-    fn select_at_cursor(&mut self) {
+    fn select_or_begin_drag(&mut self) {
         if self.ui.wants_pointer_input() {
             return;
         }
 
-        self.selected_entity = self.entity_at_cursor();
+        if let (Some(cursor), Some((viewport, view_proj))) = (
+            self.input.cursor_position(),
+            self.viewport_and_view_projection(),
+        ) && self
+            .editor
+            .begin_drag(&self.scene, cursor, viewport, view_proj)
+        {
+            return;
+        }
+
+        self.editor.select(self.entity_at_cursor());
     }
 
-    fn entity_at_cursor(&self) -> Option<Entity> {
+    fn entity_at_cursor(&self) -> Option<hecs::Entity> {
         let cursor_position = self.input.cursor_position()?;
+        let (viewport, view_proj) = self.viewport_and_view_projection()?;
+
+        let ray = picking::ray_from_cursor(cursor_position, viewport, view_proj)?;
+        self.scene.pick_entity(ray)
+    }
+
+    fn update_editor_drag(&mut self, cursor: Vec2) {
+        let Some((viewport, view_proj)) = self.viewport_and_view_projection() else {
+            return;
+        };
+
+        self.editor
+            .update_drag(&mut self.scene, cursor, viewport, view_proj);
+    }
+
+    fn viewport_and_view_projection(&self) -> Option<(Vec2, Mat4)> {
         let size = self.window.inner_size();
         let viewport = Vec2::new(size.width as f32, size.height as f32);
-
-        if viewport.x == 0.0 || viewport.y == 0.0 {
+        if viewport.x <= 0.0 || viewport.y <= 0.0 {
             return None;
         }
 
@@ -198,8 +237,6 @@ impl State {
             .scene
             .camera_view_projection(viewport.x / viewport.y)
             .ok()?;
-
-        let ray = picking::ray_from_cursor(cursor_position, viewport, view_proj)?;
-        self.scene.pick_entity(ray)
+        Some((viewport, view_proj))
     }
 }

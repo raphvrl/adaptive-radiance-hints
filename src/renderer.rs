@@ -9,19 +9,20 @@ mod passes;
 use anyhow::Result;
 use glam::Mat4;
 
-use crate::{handle::MeshHandle, scene::MeshInstance};
+use crate::{editor::GizmoDraw, handle::MeshHandle, scene::MeshInstance};
 
 use assets::MeshAssets;
 use bindings::frame::{FrameBindings, FrameUniform};
 use depth::DepthTarget;
 use instances::InstanceBuffer;
 use mesh::MeshData;
-use passes::{geometry::GeometryPass, selection::SelectionPass};
+use passes::{geometry::GeometryPass, gizmo::GizmoPass, selection::SelectionPass};
 
 pub struct Renderer {
     frame: FrameBindings,
     geometry: GeometryPass,
     selection: SelectionPass,
+    gizmo: GizmoPass,
     depth: DepthTarget,
     assets: MeshAssets,
     instances: InstanceBuffer,
@@ -37,6 +38,7 @@ impl Renderer {
         let frame = FrameBindings::new(device)?;
         let geometry = GeometryPass::new(device, target_format, frame.layout());
         let selection = SelectionPass::new(device, target_format, frame.layout());
+        let gizmo = GizmoPass::new(device, target_format, frame.layout());
         let depth = DepthTarget::new(device, width, height);
         let instances = InstanceBuffer::new(device)?;
 
@@ -44,6 +46,7 @@ impl Renderer {
             frame,
             geometry,
             selection,
+            gizmo,
             depth,
             assets: MeshAssets::default(),
             instances,
@@ -66,6 +69,7 @@ impl Renderer {
         view: &wgpu::TextureView,
         view_proj: Mat4,
         renderables: &[MeshInstance],
+        gizmo_draw: Option<GizmoDraw>,
     ) -> Result<()> {
         self.frame.write(queue, &FrameUniform { view_proj })?;
         let batches = self.instances.write(device, queue, renderables)?;
@@ -90,6 +94,15 @@ impl Renderer {
             self.depth.view(),
             self.frame.bind_group(),
             selected_model,
+        );
+
+        self.gizmo.encode(
+            device,
+            queue,
+            encoder,
+            view,
+            self.frame.bind_group(),
+            gizmo_draw,
         );
 
         Ok(())

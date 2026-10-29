@@ -6,6 +6,16 @@ pub struct Ray {
     direction: Vec3,
 }
 
+impl Ray {
+    pub fn origin(self) -> Vec3 {
+        self.origin
+    }
+
+    pub fn direction(self) -> Vec3 {
+        self.direction
+    }
+}
+
 pub fn ray_from_cursor(cursor_position: Vec2, viewport_size: Vec2, view_proj: Mat4) -> Option<Ray> {
     if !cursor_position.is_finite()
         || !viewport_size.is_finite()

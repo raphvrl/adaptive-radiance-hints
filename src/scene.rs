@@ -4,7 +4,7 @@ pub mod systems;
 
 use anyhow::{Context, Result, ensure};
 use components::{Camera, Controller, Mesh, Transform};
-use glam::Mat4;
+use glam::{Mat4, Vec3};
 use hecs::Entity;
 
 use crate::{handle::MeshHandle, input::Input};
@@ -71,6 +71,24 @@ impl Scene {
             })
             .min_by(|left, right| left.1.total_cmp(&right.1))
             .map(|(entity, _)| entity)
+    }
+
+    pub fn gizmo_world_size(&self, position: Vec3, viewport_height: f32) -> Option<f32> {
+        if !position.is_finite() || !viewport_height.is_finite() || viewport_height <= 0.0 {
+            return None;
+        }
+
+        let mut query = self.world.query::<(&Camera, &Transform)>();
+        let (camera, transform) = query.iter().next()?;
+        let depth = (position - transform.translation).dot(transform.rotation * Vec3::NEG_Z);
+        if !depth.is_finite() || depth <= 0.0 {
+            return None;
+        }
+
+        let world_units_per_pixel = 2.0 * depth * (camera.fovy * 0.5).tan() / viewport_height;
+        let size = world_units_per_pixel * 110.0;
+
+        (size.is_finite() && size > 0.0).then_some(size)
     }
 
     pub fn update(&mut self, input: &Input, delta_time: f32) {
