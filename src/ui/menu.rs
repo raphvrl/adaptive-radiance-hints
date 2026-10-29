@@ -20,6 +20,7 @@ pub fn show(root_ui: &mut egui::Ui, current_mode: TransformMode) -> (bool, Optio
                 ui.selectable_value(&mut mode, TransformMode::Scale, "Scale");
 
                 ui.menu_button("Help", |ui| {
+                    ui.label("1 / 2 / 3: Translate / Scale / Rotate");
                     ui.label("WASD / arrows: move");
                     ui.label("Space / left Shift: move vertically");
                     ui.label("Right mouse + move: look");

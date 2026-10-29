@@ -2,7 +2,7 @@ use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
 use wesl_core::include_wesl;
 
-use crate::editor::{Axis, GizmoDraw, TransformMode};
+use crate::editor::{Axis, GizmoDraw, GizmoHandle, TransformMode};
 
 const RING_SEGMENTS: usize = 64;
 const TUBE_SEGMENTS: usize = 8;
@@ -153,7 +153,7 @@ fn build_gizmo_vertices(gizmo: GizmoDraw) -> Vec<GizmoVertex> {
         TransformMode::Translate => {
             for axis in Axis::ALL {
                 let direction = axis.vector();
-                let color = axis_color(axis, gizmo.active_axis);
+                let color = axis_color(axis, gizmo.active_handle);
                 let shaft_end = gizmo.center + direction * (gizmo.size * 0.76);
                 append_cylinder(
                     &mut vertices,
@@ -183,14 +183,14 @@ fn build_gizmo_vertices(gizmo: GizmoDraw) -> Vec<GizmoVertex> {
                     axis.vector(),
                     gizmo.size * 0.84,
                     gizmo.size * 0.014,
-                    axis_color(axis, gizmo.active_axis),
+                    axis_color(axis, gizmo.active_handle),
                 );
             }
         }
         TransformMode::Scale => {
             for axis in Axis::ALL {
                 let direction = axis.vector();
-                let color = axis_color(axis, gizmo.active_axis);
+                let color = axis_color(axis, gizmo.active_handle);
                 let shaft_end = gizmo.center + direction * (gizmo.size * 0.84);
                 append_cylinder(
                     &mut vertices,
@@ -208,14 +208,20 @@ fn build_gizmo_vertices(gizmo: GizmoDraw) -> Vec<GizmoVertex> {
                     color,
                 );
             }
+            append_cube(
+                &mut vertices,
+                gizmo.center,
+                gizmo.size * 0.06,
+                center_handle_color(gizmo.active_handle),
+            );
         }
     }
 
     vertices
 }
 
-fn axis_color(axis: Axis, active_axis: Option<Axis>) -> [f32; 4] {
-    if active_axis == Some(axis) {
+fn axis_color(axis: Axis, active_handle: Option<GizmoHandle>) -> [f32; 4] {
+    if active_handle == Some(GizmoHandle::Axis(axis)) {
         return [1.0, 0.9, 0.15, 1.0];
     }
 
@@ -223,6 +229,14 @@ fn axis_color(axis: Axis, active_axis: Option<Axis>) -> [f32; 4] {
         Axis::X => [0.95, 0.22, 0.19, 1.0],
         Axis::Y => [0.28, 0.9, 0.3, 1.0],
         Axis::Z => [0.25, 0.5, 1.0, 1.0],
+    }
+}
+
+fn center_handle_color(active_handle: Option<GizmoHandle>) -> [f32; 4] {
+    if active_handle == Some(GizmoHandle::Center) {
+        [1.0, 0.9, 0.15, 1.0]
+    } else {
+        [0.92, 0.92, 0.92, 1.0]
     }
 }
 

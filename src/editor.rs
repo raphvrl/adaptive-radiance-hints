@@ -8,6 +8,7 @@ use crate::scene::{
 };
 
 const HANDLE_HIT_RADIUS_PIXELS: f32 = 11.0;
+const CENTER_HANDLE_HIT_RADIUS_PIXELS: f32 = 9.0;
 const RING_SEGMENTS: usize = 64;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -45,12 +46,18 @@ impl Axis {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GizmoHandle {
+    Axis(Axis),
+    Center,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct GizmoDraw {
     pub center: Vec3,
     pub size: f32,
     pub mode: TransformMode,
-    pub active_axis: Option<Axis>,
+    pub active_handle: Option<GizmoHandle>,
 }
 
 #[derive(Default)]
@@ -63,7 +70,7 @@ pub struct EditorState {
 #[derive(Clone, Copy)]
 struct ActiveDrag {
     entity: Entity,
-    axis: Axis,
+    handle: GizmoHandle,
     center: Vec3,
     start_translation: Vec3,
     start_rotation: Quat,
@@ -74,14 +81,21 @@ struct ActiveDrag {
 #[derive(Clone, Copy)]
 enum DragOperation {
     Translate {
+        axis: Vec3,
         plane_normal: Vec3,
         start_point: Vec3,
     },
     Rotate {
+        axis: Vec3,
         start_vector: Vec3,
     },
-    Scale {
+    ScaleAxis {
+        axis: Axis,
         screen_axis: Vec2,
+        axis_pixels: f32,
+        start_cursor: Vec2,
+    },
+    ScaleUniform {
         axis_pixels: f32,
         start_cursor: Vec2,
     },
@@ -124,7 +138,7 @@ impl EditorState {
             center,
             size: scene.gizmo_world_size(center, viewport_height)?,
             mode: self.mode,
-            active_axis: self.drag.map(|drag| drag.axis),
+            active_handle: self.drag.map(|drag| drag.handle),
         })
     }
 
@@ -151,8 +165,7 @@ impl EditorState {
         let Some(size) = scene.gizmo_world_size(center, viewport.y) else {
             return false;
         };
-        let Some(axis_handle) =
-            hit_test_gizmo(cursor, viewport, view_proj, center, size, self.mode)
+        let Some(handle) = hit_test_gizmo(cursor, viewport, view_proj, center, size, self.mode)
         else {
             return false;
         };
@@ -160,9 +173,9 @@ impl EditorState {
             return false;
         };
 
-        let axis = axis_handle.vector();
-        let operation = match self.mode {
-            TransformMode::Translate => {
+        let operation = match (self.mode, handle) {
+            (TransformMode::Translate, GizmoHandle::Axis(axis_handle)) => {
+                let axis = axis_handle.vector();
                 let plane_normal = ray.direction() - axis * ray.direction().dot(axis);
                 let Some(plane_normal) = plane_normal.try_normalize() else {
                     return false;
@@ -171,24 +184,28 @@ impl EditorState {
                     return false;
                 };
                 DragOperation::Translate {
+                    axis,
                     plane_normal,
                     start_point,
                 }
             }
-            TransformMode::Rotate => {
+            (TransformMode::Rotate, GizmoHandle::Axis(axis_handle)) => {
+                let axis = axis_handle.vector();
                 let Some(start_point) = intersect_ray_plane(ray, center, axis) else {
                     return false;
                 };
                 let Some(start_vector) = (start_point - center).try_normalize() else {
                     return false;
                 };
-                DragOperation::Rotate { start_vector }
+                DragOperation::Rotate { axis, start_vector }
             }
-            TransformMode::Scale => {
+            (TransformMode::Scale, GizmoHandle::Axis(axis)) => {
+                let axis_vector = axis.vector();
                 let Some(origin_screen) = project_to_screen(center, view_proj, viewport) else {
                     return false;
                 };
-                let Some(end_screen) = project_to_screen(center + axis * size, view_proj, viewport)
+                let Some(end_screen) =
+                    project_to_screen(center + axis_vector * size, view_proj, viewport)
                 else {
                     return false;
                 };
@@ -197,17 +214,29 @@ impl EditorState {
                 let Some(screen_axis) = projected_axis.try_normalize() else {
                     return false;
                 };
-                DragOperation::Scale {
+                DragOperation::ScaleAxis {
+                    axis,
                     screen_axis,
                     axis_pixels,
                     start_cursor: cursor,
                 }
             }
+            (TransformMode::Scale, GizmoHandle::Center) => {
+                let Some(axis_pixels) = projected_gizmo_size(center, size, view_proj, viewport)
+                else {
+                    return false;
+                };
+                DragOperation::ScaleUniform {
+                    axis_pixels,
+                    start_cursor: cursor,
+                }
+            }
+            _ => return false,
         };
 
         self.drag = Some(ActiveDrag {
             entity,
-            axis: axis_handle,
+            handle,
             center,
             start_translation,
             start_rotation,
@@ -221,10 +250,10 @@ impl EditorState {
         let Some(drag) = self.drag else {
             return;
         };
-        let axis = drag.axis.vector();
 
         match drag.operation {
             DragOperation::Translate {
+                axis,
                 plane_normal,
                 start_point,
             } => {
@@ -240,7 +269,7 @@ impl EditorState {
                 };
                 transform.translation = drag.start_translation + axis * distance;
             }
-            DragOperation::Rotate { start_vector } => {
+            DragOperation::Rotate { axis, start_vector } => {
                 let Some(ray) = picking::ray_from_cursor(cursor, viewport, view_proj) else {
                     return;
                 };
@@ -258,7 +287,8 @@ impl EditorState {
                 };
                 transform.rotation = Quat::from_axis_angle(axis, angle) * drag.start_rotation;
             }
-            DragOperation::Scale {
+            DragOperation::ScaleAxis {
+                axis,
                 screen_axis,
                 axis_pixels,
                 start_cursor,
@@ -266,11 +296,24 @@ impl EditorState {
                 let distance = (cursor - start_cursor).dot(screen_axis);
                 let factor = (1.0 + distance / axis_pixels).max(0.01);
                 let mut scale = drag.start_scale;
-                scale[drag.axis.index()] = (scale[drag.axis.index()] * factor).max(0.01);
+                scale[axis.index()] = (scale[axis.index()] * factor).max(0.01);
                 let Ok(mut transform) = scene.world.get::<&mut Transform>(drag.entity) else {
                     return;
                 };
                 transform.scale = scale;
+            }
+            DragOperation::ScaleUniform {
+                axis_pixels,
+                start_cursor,
+            } => {
+                let distance = start_cursor.y - cursor.y;
+                let min_scale = drag.start_scale.min_element().max(0.01);
+                let min_factor = 0.01 / min_scale;
+                let factor = (1.0 + distance / axis_pixels).max(min_factor);
+                let Ok(mut transform) = scene.world.get::<&mut Transform>(drag.entity) else {
+                    return;
+                };
+                transform.scale = drag.start_scale * factor;
             }
         }
     }
@@ -283,7 +326,14 @@ fn hit_test_gizmo(
     center: Vec3,
     size: f32,
     mode: TransformMode,
-) -> Option<Axis> {
+) -> Option<GizmoHandle> {
+    if mode == TransformMode::Scale {
+        let center_screen = project_to_screen(center, view_proj, viewport)?;
+        if cursor.distance(center_screen) <= CENTER_HANDLE_HIT_RADIUS_PIXELS {
+            return Some(GizmoHandle::Center);
+        }
+    }
+
     let mut closest = None;
     let mut closest_distance = HANDLE_HIT_RADIUS_PIXELS;
 
@@ -314,12 +364,25 @@ fn hit_test_gizmo(
         };
 
         if distance < closest_distance {
-            closest = Some(axis);
+            closest = Some(GizmoHandle::Axis(axis));
             closest_distance = distance;
         }
     }
 
     closest
+}
+
+fn projected_gizmo_size(center: Vec3, size: f32, view_proj: Mat4, viewport: Vec2) -> Option<f32> {
+    let center_screen = project_to_screen(center, view_proj, viewport)?;
+
+    Axis::ALL
+        .into_iter()
+        .filter_map(|axis| {
+            project_to_screen(center + axis.vector() * size, view_proj, viewport)
+                .map(|end| end.distance(center_screen))
+        })
+        .filter(|pixels| pixels.is_finite() && *pixels > f32::EPSILON)
+        .max_by(f32::total_cmp)
 }
 
 fn axis_segment_distance(

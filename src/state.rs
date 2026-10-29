@@ -5,12 +5,13 @@ use glam::{Mat4, Vec2};
 use winit::{
     dpi::PhysicalSize,
     event::{MouseButton, WindowEvent},
+    keyboard::KeyCode,
     window::{Window, WindowId},
 };
 
 use crate::{
     clock::Clock,
-    editor::EditorState,
+    editor::{EditorState, TransformMode},
     gpu::Gpu,
     input::{Input, InputButton},
     renderer::Renderer,
@@ -92,6 +93,13 @@ impl State {
 
         self.input.set_button(button, pressed);
         match (button, pressed) {
+            (InputButton::Key(KeyCode::Digit1), true) => {
+                self.editor.set_mode(TransformMode::Translate)
+            }
+            (InputButton::Key(KeyCode::Digit2), true) => self.editor.set_mode(TransformMode::Scale),
+            (InputButton::Key(KeyCode::Digit3), true) => {
+                self.editor.set_mode(TransformMode::Rotate)
+            }
             (InputButton::Mouse(MouseButton::Left), true) => self.select_or_begin_drag(),
             (InputButton::Mouse(MouseButton::Left), false) => self.editor.end_drag(),
             _ => {}
