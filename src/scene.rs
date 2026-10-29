@@ -6,7 +6,7 @@ pub mod picking;
 pub mod systems;
 
 use anyhow::{Context, Result, ensure};
-use components::{Camera, MaterialRef, Mesh, Transform};
+use components::{Camera, MaterialRef, Mesh, PointLight, SpotLight, Transform};
 use glam::{Mat4, Vec3};
 use hecs::Entity;
 
@@ -19,6 +19,25 @@ pub struct MeshInstance {
     pub albedo: Vec3,
     pub emission: Vec3,
     pub selected: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct PointLightInstance {
+    pub position: Vec3,
+    pub color: Vec3,
+    pub intensity: f32,
+    pub range: f32,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct SpotLightInstance {
+    pub position: Vec3,
+    pub direction: Vec3,
+    pub color: Vec3,
+    pub intensity: f32,
+    pub range: f32,
+    pub inner_angle: f32,
+    pub outer_angle: f32,
 }
 
 #[derive(Default)]
@@ -50,17 +69,69 @@ impl Scene {
             .collect()
     }
 
-    pub fn pick_entity(&self, ray: picking::Ray) -> Option<Entity> {
-        let mut query = self.world.query::<(Entity, &Mesh, &Transform)>();
+    pub fn point_lights(&self) -> Vec<PointLightInstance> {
+        let mut query = self.world.query::<(&PointLight, &Transform)>();
 
         query
             .iter()
-            .filter_map(|(entity, _, transform)| {
-                picking::intersect_unit_cube(ray, model_matrix(transform))
-                    .map(|distance| (entity, distance))
+            .map(|(light, transform)| PointLightInstance {
+                position: transform.translation,
+                color: light.color,
+                intensity: light.intensity,
+                range: light.range,
             })
-            .min_by(|left, right| left.1.total_cmp(&right.1))
-            .map(|(entity, _)| entity)
+            .collect()
+    }
+
+    pub fn spot_lights(&self) -> Vec<SpotLightInstance> {
+        let mut query = self.world.query::<(&SpotLight, &Transform)>();
+
+        query
+            .iter()
+            .map(|(light, transform)| SpotLightInstance {
+                position: transform.translation,
+                direction: (transform.rotation * Vec3::NEG_Z).normalize_or_zero(),
+                color: light.color,
+                intensity: light.intensity,
+                range: light.range,
+                inner_angle: light.inner_angle,
+                outer_angle: light.outer_angle,
+            })
+            .collect()
+    }
+
+    pub fn pick_entity(&self, ray: picking::Ray) -> Option<Entity> {
+        let mut query = self.world.query::<(
+            Entity,
+            &Transform,
+            Option<&Mesh>,
+            Option<&PointLight>,
+            Option<&SpotLight>,
+        )>();
+
+        query
+            .iter()
+            .filter_map(|(entity, transform, mesh, point_light, spot_light)| {
+                let mesh_hit =
+                    mesh.and_then(|_| picking::intersect_unit_cube(ray, model_matrix(transform)));
+
+                let light_hit = (point_light.is_some() || spot_light.is_some())
+                    .then(|| picking::intersect_sphere(ray, transform.translation, 0.12))
+                    .flatten();
+                let distance = mesh_hit
+                    .into_iter()
+                    .chain(light_hit)
+                    .min_by(f32::total_cmp)?;
+
+                Some((entity, distance, light_hit.is_some()))
+            })
+            .min_by(|left, right| {
+                right
+                    .2
+                    .cmp(&left.2)
+                    .then_with(|| left.1.total_cmp(&right.1))
+            })
+            .map(|(entity, _, _)| entity)
     }
 
     pub fn gizmo_world_size(&self, position: Vec3, viewport_height: f32) -> Option<f32> {

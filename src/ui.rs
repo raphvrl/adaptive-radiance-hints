@@ -4,17 +4,26 @@ mod paint;
 
 use std::time::Duration;
 
-use crate::editor::TransformMode;
+use crate::editor::{TransformMode, ViewMode};
 use winit::{event::WindowEvent, window::Window};
 
-pub use inspector::{MaterialEdit, MaterialInspectorData};
+pub use inspector::{LightEdit, LightInspectorData, MaterialEdit, MaterialInspectorData};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AddLightKind {
+    Point,
+    Spot,
+}
 
 pub struct UiResponse {
     pub quit_requested: bool,
     pub save_requested: bool,
+    pub add_light: Option<AddLightKind>,
     pub material_edit: Option<MaterialEdit>,
+    pub light_edit: Option<LightEdit>,
     pub repaint_delay: Duration,
     pub transform_mode: Option<TransformMode>,
+    pub view_mode: Option<ViewMode>,
 }
 
 pub struct UiFrame {
@@ -67,18 +76,28 @@ impl Ui {
         &mut self,
         window: &Window,
         mode: TransformMode,
+        view_mode: ViewMode,
         material: Option<MaterialInspectorData>,
+        light: Option<LightInspectorData>,
     ) -> UiFrame {
         let input = self.platform.take_egui_input(window);
 
-        let (mut quit_requested, mut save_requested, mut transform_mode) = (false, false, None);
+        let (mut quit_requested, mut save_requested, mut transform_mode, mut add_light) =
+            (false, false, None, None);
         let mut material_edit = None;
+        let mut light_edit = None;
+        let mut view_mode_change = None;
         let mut output = self.context.run_ui(input, |root_ui| {
-            let (quit, save, selected_mode) = menu::show(root_ui, mode);
+            let (quit, save, selected_mode, new_light, selected_view_mode) =
+                menu::show(root_ui, mode, view_mode);
             quit_requested |= quit;
             save_requested |= save;
             transform_mode = selected_mode;
+            add_light = new_light;
+            view_mode_change = selected_view_mode;
+
             material_edit = inspector::show(root_ui, material.as_ref());
+            light_edit = inspector::show_light(root_ui, light.as_ref());
         });
         self.platform
             .handle_platform_output(window, std::mem::take(&mut output.platform_output));
@@ -93,9 +112,12 @@ impl Ui {
             response: UiResponse {
                 quit_requested,
                 save_requested,
+                add_light,
                 material_edit,
+                light_edit,
                 repaint_delay,
                 transform_mode,
+                view_mode: view_mode_change,
             },
         }
     }

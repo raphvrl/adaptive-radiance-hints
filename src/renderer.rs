@@ -2,6 +2,7 @@ mod assets;
 mod bindings;
 mod depth;
 mod instances;
+mod lights;
 pub mod mesh;
 pub mod meshes;
 mod passes;
@@ -9,17 +10,23 @@ mod passes;
 use anyhow::Result;
 use glam::Mat4;
 
-use crate::{editor::GizmoDraw, handle::MeshHandle, scene::MeshInstance};
+use crate::{
+    editor::{GizmoDraw, LightMarkerDraw},
+    handle::MeshHandle,
+    scene::{MeshInstance, PointLightInstance, SpotLightInstance},
+};
 
 use assets::MeshAssets;
 use bindings::frame::{FrameBindings, FrameUniform};
 use depth::DepthTarget;
 use instances::InstanceBuffer;
+use lights::LightBuffer;
 use mesh::MeshData;
 use passes::{geometry::GeometryPass, gizmo::GizmoPass, selection::SelectionPass};
 
 pub struct Renderer {
     frame: FrameBindings,
+    lights: LightBuffer,
     geometry: GeometryPass,
     selection: SelectionPass,
     gizmo: GizmoPass,
@@ -36,7 +43,8 @@ impl Renderer {
         height: u32,
     ) -> Result<Self> {
         let frame = FrameBindings::new(device)?;
-        let geometry = GeometryPass::new(device, target_format, frame.layout());
+        let lights = LightBuffer::new(device)?;
+        let geometry = GeometryPass::new(device, target_format, frame.layout(), lights.layout());
         let selection = SelectionPass::new(device, target_format, frame.layout());
         let gizmo = GizmoPass::new(device, target_format, frame.layout());
         let depth = DepthTarget::new(device, width, height);
@@ -44,6 +52,7 @@ impl Renderer {
 
         Ok(Self {
             frame,
+            lights,
             geometry,
             selection,
             gizmo,
@@ -69,9 +78,14 @@ impl Renderer {
         view: &wgpu::TextureView,
         view_proj: Mat4,
         renderables: &[MeshInstance],
+        point_lights: &[PointLightInstance],
+        spot_lights: &[SpotLightInstance],
         gizmo_draw: Option<GizmoDraw>,
+        light_markers: &[LightMarkerDraw],
     ) -> Result<()> {
         self.frame.write(queue, &FrameUniform { view_proj })?;
+        self.lights
+            .write(device, queue, point_lights, spot_lights)?;
         let batches = self.instances.write(device, queue, renderables)?;
         let selected_model = renderables
             .iter()
@@ -82,6 +96,7 @@ impl Renderer {
             view,
             self.depth.view(),
             self.frame.bind_group(),
+            self.lights.bind_group(),
             &self.assets,
             &self.instances,
             &batches,
@@ -103,6 +118,7 @@ impl Renderer {
             view,
             self.frame.bind_group(),
             gizmo_draw,
+            light_markers,
         );
 
         Ok(())

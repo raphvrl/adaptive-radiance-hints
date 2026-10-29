@@ -1,5 +1,5 @@
 (
-    version: 2,
+    version: 3,
     materials: [
         (
             id: "white",
@@ -111,6 +111,26 @@
             material: Some("area_light"),
             camera: None,
             controller: None,
+        ),
+        (
+            name: "CeilingSpotlight",
+            transform: (
+                translation: (0.0, 2.465, -0.15),
+                rotation_xyzw: (-0.70710677, 0.0, 0.0, 0.70710677),
+                scale: (1.0, 1.0, 1.0),
+            ),
+            mesh: None,
+            material: None,
+            camera: None,
+            controller: None,
+            point_light: None,
+            spot_light: Some((
+                color: (1.0, 0.96, 0.86),
+                intensity: 20.0,
+                range: 4.5,
+                inner_angle: 0.35,
+                outer_angle: 0.52,
+            )),
         ),
         (
             name: "TallBlock",

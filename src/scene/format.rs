@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::scene::materials::MaterialId;
 
-pub const SCENE_FORMAT_VERSION: u32 = 2;
+pub const SCENE_FORMAT_VERSION: u32 = 3;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -25,6 +25,10 @@ pub struct EntityData {
     pub camera: Option<CameraData>,
     #[serde(default)]
     pub controller: Option<ControllerData>,
+    #[serde(default)]
+    pub point_light: Option<PointLightData>,
+    #[serde(default)]
+    pub spot_light: Option<SpotLightData>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -66,13 +70,31 @@ pub struct ControllerData {
     pub pitch: f32,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PointLightData {
+    pub color: [f32; 3],
+    pub intensity: f32,
+    pub range: f32,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpotLightData {
+    pub color: [f32; 3],
+    pub intensity: f32,
+    pub range: f32,
+    pub inner_angle: f32,
+    pub outer_angle: f32,
+}
+
 impl SceneFile {
     pub fn validate(&self) -> anyhow::Result<()> {
         use anyhow::{Context, ensure};
 
         ensure!(
-            self.version == SCENE_FORMAT_VERSION,
-            "unsupported scene format version {} (expected {})",
+            self.version == 2 || self.version == SCENE_FORMAT_VERSION,
+            "unsupported scene format version {} (supported versions are 2 and {})",
             self.version,
             SCENE_FORMAT_VERSION
         );
@@ -183,6 +205,50 @@ impl SceneFile {
                         && controller.pitch.is_finite()
                         && controller.pitch.abs() < std::f32::consts::FRAC_PI_2,
                     "controller on '{name}' has an invalid orientation"
+                );
+            }
+
+            if let Some(light) = &entity.point_light {
+                ensure!(
+                    light
+                        .color
+                        .into_iter()
+                        .all(|value| value.is_finite() && value >= 0.0),
+                    "point light on '{name}' has an invalid color"
+                );
+                ensure!(
+                    light.intensity.is_finite() && light.intensity >= 0.0,
+                    "point light on '{name}' has an invalid intensity"
+                );
+                ensure!(
+                    light.range.is_finite() && light.range > 0.0,
+                    "point light on '{name}' has an invalid range"
+                );
+            }
+
+            if let Some(light) = &entity.spot_light {
+                ensure!(
+                    light
+                        .color
+                        .into_iter()
+                        .all(|value| value.is_finite() && value >= 0.0),
+                    "spot light on '{name}' has an invalid color"
+                );
+                ensure!(
+                    light.intensity.is_finite() && light.intensity >= 0.0,
+                    "spot light on '{name}' has an invalid intensity"
+                );
+                ensure!(
+                    light.range.is_finite() && light.range > 0.0,
+                    "spot light on '{name}' has an invalid range"
+                );
+                ensure!(
+                    light.inner_angle.is_finite()
+                        && light.inner_angle >= 0.0
+                        && light.outer_angle.is_finite()
+                        && light.outer_angle > light.inner_angle
+                        && light.outer_angle < std::f32::consts::FRAC_PI_2,
+                    "spot light on '{name}' has invalid cone angles"
                 );
             }
         }

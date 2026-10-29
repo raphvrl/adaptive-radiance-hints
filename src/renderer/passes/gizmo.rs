@@ -2,7 +2,7 @@ use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
 use wesl_core::include_wesl;
 
-use crate::editor::{Axis, GizmoDraw, GizmoHandle, TransformMode};
+use crate::editor::{Axis, GizmoDraw, GizmoHandle, LightGizmo, LightMarkerDraw, TransformMode};
 
 const RING_SEGMENTS: usize = 64;
 const TUBE_SEGMENTS: usize = 8;
@@ -19,6 +19,7 @@ const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 2] =
 
 pub struct GizmoPass {
     pipeline: wgpu::RenderPipeline,
+    line_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     capacity: usize,
 }
@@ -40,44 +41,27 @@ impl GizmoPass {
             immediate_size: 0,
         });
 
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Gizmo pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: None,
-                compilation_options: Default::default(),
-                buffers: &[Some(wgpu::VertexBufferLayout {
-                    array_stride: std::mem::size_of::<GizmoVertex>() as wgpu::BufferAddress,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &VERTEX_ATTRIBUTES,
-                })],
-            },
-            primitive: wgpu::PrimitiveState {
-                cull_mode: None,
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: None,
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: target_format,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        let pipeline = create_pipeline(
+            device,
+            &shader,
+            &pipeline_layout,
+            target_format,
+            wgpu::PrimitiveTopology::TriangleList,
+        );
+        let line_pipeline = create_pipeline(
+            device,
+            &shader,
+            &pipeline_layout,
+            target_format,
+            wgpu::PrimitiveTopology::LineList,
+        );
 
         let capacity = 1024;
         let vertex_buffer = create_vertex_buffer(device, capacity);
 
         Self {
             pipeline,
+            line_pipeline,
             vertex_buffer,
             capacity,
         }
@@ -91,12 +75,21 @@ impl GizmoPass {
         target: &wgpu::TextureView,
         frame_bind_group: &wgpu::BindGroup,
         gizmo: Option<GizmoDraw>,
+        light_markers: &[LightMarkerDraw],
     ) {
-        let Some(gizmo) = gizmo else {
-            return;
-        };
+        let mut vertices = gizmo.map(build_gizmo_vertices).unwrap_or_default();
+        let line_start = vertices.len();
 
-        let vertices = build_gizmo_vertices(gizmo);
+        if let Some(gizmo) = gizmo {
+            if let Some(light) = gizmo.light {
+                append_light_gizmo(&mut vertices, gizmo.center, gizmo.size, light);
+            }
+        }
+
+        for marker in light_markers {
+            append_light_marker(&mut vertices, *marker);
+        }
+
         if vertices.is_empty() {
             return;
         }
@@ -121,10 +114,18 @@ impl GizmoPass {
             multiview_mask: None,
         });
 
-        pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, frame_bind_group, &[]);
         pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-        pass.draw(0..vertices.len() as u32, 0..1);
+
+        if line_start > 0 {
+            pass.set_pipeline(&self.pipeline);
+            pass.draw(0..line_start as u32, 0..1);
+        }
+
+        if line_start < vertices.len() {
+            pass.set_pipeline(&self.line_pipeline);
+            pass.draw(line_start as u32..vertices.len() as u32, 0..1);
+        }
     }
 
     fn ensure_capacity(&mut self, device: &wgpu::Device, required: usize) {
@@ -143,6 +144,48 @@ fn create_vertex_buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffer 
         size: (capacity * std::mem::size_of::<GizmoVertex>()) as wgpu::BufferAddress,
         usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
+    })
+}
+
+fn create_pipeline(
+    device: &wgpu::Device,
+    shader: &wgpu::ShaderModule,
+    layout: &wgpu::PipelineLayout,
+    target_format: wgpu::TextureFormat,
+    topology: wgpu::PrimitiveTopology,
+) -> wgpu::RenderPipeline {
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("Gizmo pipeline"),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: None,
+            compilation_options: Default::default(),
+            buffers: &[Some(wgpu::VertexBufferLayout {
+                array_stride: std::mem::size_of::<GizmoVertex>() as wgpu::BufferAddress,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &VERTEX_ATTRIBUTES,
+            })],
+        },
+        primitive: wgpu::PrimitiveState {
+            topology,
+            cull_mode: None,
+            ..Default::default()
+        },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: None,
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: target_format,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview_mask: None,
+        cache: None,
     })
 }
 
@@ -218,6 +261,143 @@ fn build_gizmo_vertices(gizmo: GizmoDraw) -> Vec<GizmoVertex> {
     }
 
     vertices
+}
+
+fn append_light_gizmo(
+    vertices: &mut Vec<GizmoVertex>,
+    center: Vec3,
+    gizmo_size: f32,
+    light: LightGizmo,
+) {
+    let (range, intensity, light_color) = match light {
+        LightGizmo::Point {
+            range,
+            intensity,
+            color,
+        }
+        | LightGizmo::Spot {
+            range,
+            intensity,
+            color,
+            ..
+        } => (range, intensity.max(0.0), color),
+    };
+
+    let power = intensity / (intensity + 10.0);
+    let brightness = 0.25 + 0.75 * power;
+    let display_color = (light_color * brightness).clamp(Vec3::splat(0.1), Vec3::ONE);
+    let color = [display_color.x, display_color.y, display_color.z, 1.0];
+    let marker_size = gizmo_size * (0.035 + 0.035 * power);
+
+    append_wire_cube(vertices, center, marker_size, color);
+
+    match light {
+        LightGizmo::Point { .. } => {
+            for axis in [Vec3::X, Vec3::Y, Vec3::Z] {
+                append_wire_ring(vertices, center, axis, range, color);
+            }
+        }
+        LightGizmo::Spot {
+            direction,
+            inner_angle,
+            outer_angle,
+            ..
+        } => {
+            let Some(direction) = direction.try_normalize() else {
+                return;
+            };
+            let (u, v) = perpendicular_basis(direction);
+            let end = center + direction * range;
+            let outer_radius = range * outer_angle.tan();
+            let inner_radius = range * inner_angle.tan();
+
+            append_wire_ring(vertices, end, direction, outer_radius, color);
+            if inner_radius > f32::EPSILON {
+                let inner_color = [1.0, 0.88, 0.42, 1.0];
+                append_wire_ring(vertices, end, direction, inner_radius, inner_color);
+            }
+
+            for segment in 0..8 {
+                let angle = std::f32::consts::TAU * segment as f32 / 8.0;
+                let radial = u * angle.cos() + v * angle.sin();
+                append_line(vertices, center, end + radial * outer_radius, color);
+            }
+        }
+    }
+}
+
+fn append_light_marker(vertices: &mut Vec<GizmoVertex>, marker: LightMarkerDraw) {
+    let intensity = marker.intensity.max(0.0);
+    let power = intensity / (intensity + 10.0);
+    let brightness = 0.25 + 0.75 * power;
+    let display_color = (marker.color * brightness).clamp(Vec3::splat(0.1), Vec3::ONE);
+    let color = [display_color.x, display_color.y, display_color.z, 1.0];
+    let marker_size = marker.size * (0.035 + 0.035 * power);
+
+    append_wire_cube(vertices, marker.center, marker_size, color);
+}
+
+fn append_wire_ring(
+    vertices: &mut Vec<GizmoVertex>,
+    center: Vec3,
+    axis: Vec3,
+    radius: f32,
+    color: [f32; 4],
+) {
+    let (u, v) = perpendicular_basis(axis);
+    let mut previous = center + u * radius;
+
+    for segment in 1..=RING_SEGMENTS {
+        let angle = std::f32::consts::TAU * segment as f32 / RING_SEGMENTS as f32;
+        let radial = u * angle.cos() + v * angle.sin();
+        let next = center + radial * radius;
+        append_line(vertices, previous, next, color);
+        previous = next;
+    }
+}
+
+fn append_wire_cube(
+    vertices: &mut Vec<GizmoVertex>,
+    center: Vec3,
+    half_size: f32,
+    color: [f32; 4],
+) {
+    const EDGES: [[usize; 2]; 12] = [
+        [0, 1],
+        [1, 2],
+        [2, 3],
+        [3, 0],
+        [4, 5],
+        [5, 6],
+        [6, 7],
+        [7, 4],
+        [0, 4],
+        [1, 5],
+        [2, 6],
+        [3, 7],
+    ];
+    let corners = [
+        Vec3::new(-1.0, -1.0, -1.0),
+        Vec3::new(1.0, -1.0, -1.0),
+        Vec3::new(1.0, 1.0, -1.0),
+        Vec3::new(-1.0, 1.0, -1.0),
+        Vec3::new(-1.0, -1.0, 1.0),
+        Vec3::new(1.0, -1.0, 1.0),
+        Vec3::new(1.0, 1.0, 1.0),
+        Vec3::new(-1.0, 1.0, 1.0),
+    ]
+    .map(|corner| center + corner * half_size);
+
+    for [start, end] in EDGES {
+        append_line(vertices, corners[start], corners[end], color);
+    }
+}
+
+fn append_line(vertices: &mut Vec<GizmoVertex>, start: Vec3, end: Vec3, color: [f32; 4]) {
+    vertices.extend([start, end].map(|position| GizmoVertex {
+        position: position.to_array(),
+        color,
+    }));
 }
 
 fn axis_color(axis: Axis, active_handle: Option<GizmoHandle>) -> [f32; 4] {

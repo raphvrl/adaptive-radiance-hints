@@ -3,7 +3,7 @@ use hecs::Entity;
 
 use crate::scene::{
     Scene,
-    components::Transform,
+    components::{PointLight, SpotLight, Transform},
     picking::{self, Ray},
 };
 
@@ -17,6 +17,13 @@ pub enum TransformMode {
     Translate,
     Rotate,
     Scale,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ViewMode {
+    #[default]
+    Scene,
+    LightMarkers,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -58,12 +65,39 @@ pub struct GizmoDraw {
     pub size: f32,
     pub mode: TransformMode,
     pub active_handle: Option<GizmoHandle>,
+    pub light: Option<LightGizmo>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct LightMarkerDraw {
+    pub center: Vec3,
+    pub size: f32,
+    pub color: Vec3,
+    pub intensity: f32,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum LightGizmo {
+    Point {
+        range: f32,
+        intensity: f32,
+        color: Vec3,
+    },
+    Spot {
+        direction: Vec3,
+        range: f32,
+        intensity: f32,
+        color: Vec3,
+        inner_angle: f32,
+        outer_angle: f32,
+    },
 }
 
 #[derive(Default)]
 pub struct EditorState {
     selected_entity: Option<Entity>,
     mode: TransformMode,
+    view_mode: ViewMode,
     drag: Option<ActiveDrag>,
 }
 
@@ -110,9 +144,17 @@ impl EditorState {
         self.mode
     }
 
+    pub fn view_mode(&self) -> ViewMode {
+        self.view_mode
+    }
+
     pub fn set_mode(&mut self, mode: TransformMode) {
         self.mode = mode;
         self.drag = None;
+    }
+
+    pub fn set_view_mode(&mut self, mode: ViewMode) {
+        self.view_mode = mode;
     }
 
     pub fn select(&mut self, entity: Option<Entity>) {
@@ -132,14 +174,71 @@ impl EditorState {
         let entity = self.selected_entity?;
         let transform = scene.world.get::<&Transform>(entity).ok()?;
         let center = transform.translation;
+        let direction = transform.rotation * Vec3::NEG_Z;
         drop(transform);
+
+        let light = scene
+            .world
+            .get::<&SpotLight>(entity)
+            .ok()
+            .map(|light| LightGizmo::Spot {
+                direction,
+                range: light.range,
+                intensity: light.intensity,
+                color: light.color,
+                inner_angle: light.inner_angle,
+                outer_angle: light.outer_angle,
+            })
+            .or_else(|| {
+                scene
+                    .world
+                    .get::<&PointLight>(entity)
+                    .ok()
+                    .map(|light| LightGizmo::Point {
+                        range: light.range,
+                        intensity: light.intensity,
+                        color: light.color,
+                    })
+            });
 
         Some(GizmoDraw {
             center,
             size: scene.gizmo_world_size(center, viewport_height)?,
             mode: self.mode,
             active_handle: self.drag.map(|drag| drag.handle),
+            light,
         })
+    }
+
+    pub fn light_marker_draws(
+        &self,
+        scene: &Scene,
+        viewport_height: f32,
+    ) -> Vec<LightMarkerDraw> {
+        let mut query = scene
+            .world
+            .query::<(Entity, &Transform, Option<&PointLight>, Option<&SpotLight>)>();
+
+        query
+            .iter()
+            .filter_map(|(entity, transform, point_light, spot_light)| {
+                if self.selected_entity == Some(entity) {
+                    return None;
+                }
+
+                let (color, intensity) = spot_light
+                    .map(|light| (light.color, light.intensity))
+                    .or_else(|| point_light.map(|light| (light.color, light.intensity)))?;
+                let size = scene.gizmo_world_size(transform.translation, viewport_height)?;
+
+                Some(LightMarkerDraw {
+                    center: transform.translation,
+                    size,
+                    color,
+                    intensity,
+                })
+            })
+            .collect()
     }
 
     pub fn begin_drag(

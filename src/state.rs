@@ -1,7 +1,11 @@
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+    sync::Arc,
+};
 
 use anyhow::Result;
-use glam::{Mat4, Vec2};
+use glam::{Mat4, Quat, Vec2, Vec3};
 use winit::{
     dpi::PhysicalSize,
     event::{MouseButton, WindowEvent},
@@ -11,16 +15,19 @@ use winit::{
 
 use crate::{
     clock::Clock,
-    editor::{EditorState, TransformMode},
+    editor::{EditorState, TransformMode, ViewMode},
     gpu::Gpu,
     input::{Input, InputButton},
     renderer::Renderer,
     scene::{
         Scene,
-        components::{MaterialRef, Name},
+        components::{Camera, MaterialRef, Name, PointLight, SpotLight, Transform},
         picking,
     },
-    ui::{MaterialEdit, MaterialInspectorData, Ui, UiResponse},
+    ui::{
+        AddLightKind, LightEdit, LightInspectorData, MaterialEdit, MaterialInspectorData, Ui,
+        UiResponse,
+    },
 };
 
 pub struct State {
@@ -112,6 +119,7 @@ impl State {
                 self.editor.set_mode(TransformMode::Rotate)
             }
             (InputButton::Key(KeyCode::Escape), true) => self.editor.select(None),
+            (InputButton::Key(KeyCode::Delete), true) => self.delete_selected_entity(),
             (InputButton::Mouse(MouseButton::Left), true) => self.select_or_begin_drag(),
             (InputButton::Mouse(MouseButton::Left), false) => self.editor.end_drag(),
             _ => {}
@@ -160,13 +168,34 @@ impl State {
         let aspect_ratio = size.width as f32 / size.height as f32;
         let view_proj = self.scene.camera_view_projection(aspect_ratio)?;
         let material = self.selected_material_inspector();
-        let mut ui_frame = self.ui.run(&self.window, self.editor.mode(), material);
+        let light = self.selected_light_inspector();
+        let mut ui_frame = self
+            .ui
+            .run(
+                &self.window,
+                self.editor.mode(),
+                self.editor.view_mode(),
+                material,
+                light,
+            );
+
         if let Some(mode) = ui_frame.response.transform_mode {
             self.editor.set_mode(mode);
+        }
+        if let Some(mode) = ui_frame.response.view_mode {
+            self.editor.set_view_mode(mode);
         }
         if let Some(edit) = ui_frame.response.material_edit.take() {
             self.apply_material_edit(edit);
         }
+        if let Some(edit) = ui_frame.response.light_edit.take() {
+            self.apply_light_edit(edit);
+        }
+
+        if let Some(kind) = ui_frame.response.add_light.take() {
+            self.add_light(kind);
+        }
+
         if ui_frame.response.save_requested {
             match crate::scene::io::save_scene(&self.scene_path, &self.scene) {
                 Ok(()) => tracing::info!(path = %self.scene_path.display(), "scene saved"),
@@ -177,8 +206,17 @@ impl State {
                 ),
             }
         }
+
         let renderables = self.scene.mesh_instances(self.editor.selected_entity());
+        let point_lights = self.scene.point_lights();
+        let spot_lights = self.scene.spot_lights();
         let gizmo_draw = self.editor.gizmo_draw(&self.scene, size.height as f32);
+        let light_markers = if self.editor.view_mode() == ViewMode::LightMarkers {
+            self.editor
+                .light_marker_draws(&self.scene, size.height as f32)
+        } else {
+            Vec::new()
+        };
 
         let view = frame
             .texture
@@ -198,7 +236,10 @@ impl State {
             &view,
             view_proj,
             &renderables,
+            &point_lights,
+            &spot_lights,
             gizmo_draw,
+            &light_markers,
         )?;
 
         let callback_commands = self.ui.encode(
@@ -281,6 +322,130 @@ impl State {
         })
     }
 
+    fn selected_light_inspector(&self) -> Option<LightInspectorData> {
+        let entity = self.editor.selected_entity()?;
+        let entity_name = self.scene.world.get::<&Name>(entity).ok()?.0.clone();
+
+        if let Ok(light) = self.scene.world.get::<&SpotLight>(entity) {
+            return Some(LightInspectorData {
+                entity_name,
+                is_spot: true,
+                color: light.color.to_array(),
+                intensity: light.intensity,
+                range: light.range,
+                inner_angle: light.inner_angle,
+                outer_angle: light.outer_angle,
+            });
+        }
+
+        let light = self.scene.world.get::<&PointLight>(entity).ok()?;
+        Some(LightInspectorData {
+            entity_name,
+            is_spot: false,
+            color: light.color.to_array(),
+            intensity: light.intensity,
+            range: light.range,
+            inner_angle: 0.0,
+            outer_angle: 0.0,
+        })
+    }
+
+    fn apply_light_edit(&mut self, edit: LightEdit) {
+        let Some(entity) = self.editor.selected_entity() else {
+            return;
+        };
+
+        match edit {
+            LightEdit::Point {
+                color,
+                intensity,
+                range,
+            } => {
+                if let Ok(mut light) = self.scene.world.get::<&mut PointLight>(entity) {
+                    light.color = Vec3::from_array(color);
+                    light.intensity = intensity;
+                    light.range = range;
+                }
+            }
+
+            LightEdit::Spot {
+                color,
+                intensity,
+                range,
+                inner_angle,
+                outer_angle,
+            } => {
+                if let Ok(mut light) = self.scene.world.get::<&mut SpotLight>(entity) {
+                    light.color = Vec3::from_array(color);
+                    light.intensity = intensity;
+                    light.range = range;
+                    light.inner_angle = inner_angle;
+                    light.outer_angle = outer_angle;
+                }
+            }
+        }
+    }
+
+    fn add_light(&mut self, kind: AddLightKind) {
+        let base_name = match kind {
+            AddLightKind::Point => "PointLight",
+            AddLightKind::Spot => "SpotLight",
+        };
+
+        let name = self.unique_entity_name(base_name);
+        let transform = self.new_light_transform();
+
+        let entity = match kind {
+            AddLightKind::Point => {
+                self.scene
+                    .world
+                    .spawn((Name(name), transform, PointLight::default()))
+            }
+            AddLightKind::Spot => {
+                self.scene
+                    .world
+                    .spawn((Name(name), transform, SpotLight::default()))
+            }
+        };
+
+        self.editor.select(Some(entity));
+        self.request_redraw();
+    }
+
+    fn unique_entity_name(&self, prefix: &str) -> String {
+        let mut query = self.scene.world.query::<&Name>();
+        let names = query
+            .iter()
+            .map(|name| name.0.clone())
+            .collect::<HashSet<_>>();
+
+        let mut suffix = 1;
+        loop {
+            let candidate = format!("{prefix}{suffix}");
+            if !names.contains(&candidate) {
+                return candidate;
+            }
+            suffix += 1;
+        }
+    }
+
+    fn new_light_transform(&self) -> Transform {
+        let mut query = self.scene.world.query::<(&Camera, &Transform)>();
+        query
+            .iter()
+            .next()
+            .map(|(_, camera)| Transform {
+                translation: camera.translation + camera.rotation * Vec3::NEG_Z * 2.0,
+                rotation: camera.rotation,
+                scale: Vec3::ONE,
+            })
+            .unwrap_or(Transform {
+                translation: Vec3::ZERO,
+                rotation: Quat::IDENTITY,
+                scale: Vec3::ONE,
+            })
+    }
+
     fn apply_material_edit(&mut self, edit: MaterialEdit) {
         let Some(material) = self.scene.materials.get_mut(&edit.material_id) else {
             return;
@@ -288,6 +453,21 @@ impl State {
 
         material.albedo = glam::Vec3::from_array(edit.albedo);
         material.emission = glam::Vec3::from_array(edit.emission);
+    }
+
+    fn delete_selected_entity(&mut self) {
+        let Some(entity) = self.editor.selected_entity() else {
+            return;
+        };
+
+        if self.scene.world.get::<&Camera>(entity).is_ok() {
+            tracing::warn!("cannot delete the active camera");
+            return;
+        }
+
+        if self.scene.world.despawn(entity).is_ok() {
+            self.editor.select(None);
+        }
     }
 
     fn viewport_and_view_projection(&self) -> Option<(Vec2, Mat4)> {

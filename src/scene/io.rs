@@ -7,10 +7,12 @@ use crate::{
     handle::MeshHandle,
     scene::{
         Scene,
-        components::{Camera, Controller, MaterialRef, Mesh, Name, Transform},
+        components::{
+            Camera, Controller, MaterialRef, Mesh, Name, PointLight, SpotLight, Transform,
+        },
         format::{
-            CameraData, ControllerData, EntityData, MaterialData, MeshData, SCENE_FORMAT_VERSION,
-            SceneFile, TransformData,
+            CameraData, ControllerData, EntityData, MaterialData, MeshData, PointLightData,
+            SCENE_FORMAT_VERSION, SceneFile, SpotLightData, TransformData,
         },
         materials::Material,
     },
@@ -19,8 +21,10 @@ use crate::{
 pub fn load_scene(path: &Path, mesh_assets: &HashMap<String, MeshHandle>) -> Result<Scene> {
     let source = fs::read_to_string(path)
         .with_context(|| format!("failed to read scene '{}'", path.display()))?;
+
     let scene_file: SceneFile = ron::from_str(&source)
         .with_context(|| format!("failed to parse scene '{}'", path.display()))?;
+
     scene_file.validate()?;
 
     let mut scene = Scene::default();
@@ -82,6 +86,30 @@ pub fn load_scene(path: &Path, mesh_assets: &HashMap<String, MeshHandle>) -> Res
                 },
             )?;
         }
+
+        if let Some(light) = data.point_light {
+            scene.world.insert_one(
+                entity,
+                PointLight {
+                    color: Vec3::from_array(light.color),
+                    intensity: light.intensity,
+                    range: light.range,
+                },
+            )?;
+        }
+
+        if let Some(light) = data.spot_light {
+            scene.world.insert_one(
+                entity,
+                SpotLight {
+                    color: Vec3::from_array(light.color),
+                    intensity: light.intensity,
+                    range: light.range,
+                    inner_angle: light.inner_angle,
+                    outer_angle: light.outer_angle,
+                },
+            )?;
+        }
     }
 
     Ok(scene)
@@ -95,33 +123,49 @@ pub fn save_scene(path: &Path, scene: &Scene) -> Result<()> {
         Option<&MaterialRef>,
         Option<&Camera>,
         Option<&Controller>,
+        Option<&PointLight>,
+        Option<&SpotLight>,
     )>();
 
     let mut entities = query
         .iter()
         .map(
-            |(name, transform, mesh, material_ref, camera, controller)| EntityData {
-                name: name.0.clone(),
-                transform: TransformData {
-                    translation: transform.translation.to_array(),
-                    rotation_xyzw: transform.rotation.to_array(),
-                    scale: transform.scale.to_array(),
-                },
-                mesh: mesh.map(|mesh| MeshData {
-                    asset: mesh.asset_id.clone(),
-                }),
-                material: material_ref.map(|material_ref| material_ref.0.clone()),
-                camera: camera.map(|camera| CameraData {
-                    fovy_radians: camera.fovy,
-                    near: camera.near,
-                    far: camera.far,
-                }),
-                controller: controller.map(|controller| ControllerData {
-                    move_speed: controller.move_speed,
-                    look_sensitivity: controller.look_sensitivity,
-                    yaw: controller.yaw,
-                    pitch: controller.pitch,
-                }),
+            |(name, transform, mesh, material_ref, camera, controller, point_light, spot_light)| {
+                EntityData {
+                    name: name.0.clone(),
+                    transform: TransformData {
+                        translation: transform.translation.to_array(),
+                        rotation_xyzw: transform.rotation.to_array(),
+                        scale: transform.scale.to_array(),
+                    },
+                    mesh: mesh.map(|mesh| MeshData {
+                        asset: mesh.asset_id.clone(),
+                    }),
+                    material: material_ref.map(|material_ref| material_ref.0.clone()),
+                    camera: camera.map(|camera| CameraData {
+                        fovy_radians: camera.fovy,
+                        near: camera.near,
+                        far: camera.far,
+                    }),
+                    controller: controller.map(|controller| ControllerData {
+                        move_speed: controller.move_speed,
+                        look_sensitivity: controller.look_sensitivity,
+                        yaw: controller.yaw,
+                        pitch: controller.pitch,
+                    }),
+                    point_light: point_light.map(|light| PointLightData {
+                        color: light.color.to_array(),
+                        intensity: light.intensity,
+                        range: light.range,
+                    }),
+                    spot_light: spot_light.map(|light| SpotLightData {
+                        color: light.color.to_array(),
+                        intensity: light.intensity,
+                        range: light.range,
+                        inner_angle: light.inner_angle,
+                        outer_angle: light.outer_angle,
+                    }),
+                }
             },
         )
         .collect::<Vec<_>>();

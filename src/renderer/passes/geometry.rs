@@ -15,13 +15,14 @@ impl GeometryPass {
         device: &wgpu::Device,
         target_format: wgpu::TextureFormat,
         frame_layout: &wgpu::BindGroupLayout,
+        lights_layout: &wgpu::BindGroupLayout,
     ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Geometry shader"),
             source: wgpu::ShaderSource::Wgsl(include_wesl!("geometry").into()),
         });
 
-        let bind_group_layouts = [Some(frame_layout)];
+        let bind_group_layouts = [Some(frame_layout), Some(lights_layout)];
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Geometry pipeline layout"),
             bind_group_layouts: &bind_group_layouts,
@@ -69,6 +70,7 @@ impl GeometryPass {
         target: &wgpu::TextureView,
         depth: &wgpu::TextureView,
         frame_bind_group: &wgpu::BindGroup,
+        lights_bind_group: &wgpu::BindGroup,
         assets: &MeshAssets,
         instances: &InstanceBuffer,
         batches: &[MeshBatch],
@@ -104,6 +106,7 @@ impl GeometryPass {
 
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, frame_bind_group, &[]);
+        pass.set_bind_group(1, lights_bind_group, &[]);
         pass.set_vertex_buffer(1, instances.buffer().slice(..));
 
         for batch in batches {

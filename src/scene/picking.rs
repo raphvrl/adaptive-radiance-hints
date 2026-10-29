@@ -79,6 +79,31 @@ pub fn intersect_unit_cube(ray: Ray, model: Mat4) -> Option<f32> {
     Some(entry_distance)
 }
 
+pub fn intersect_sphere(ray: Ray, center: Vec3, radius: f32) -> Option<f32> {
+    if !center.is_finite() || !radius.is_finite() || radius <= 0.0 {
+        return None;
+    }
+
+    let offset = ray.origin - center;
+    let projection = offset.dot(ray.direction);
+    let discriminant = projection * projection - (offset.length_squared() - radius * radius);
+    if discriminant < 0.0 {
+        return None;
+    }
+
+    let root = discriminant.sqrt();
+    let near = -projection - root;
+    let far = -projection + root;
+
+    if near >= 0.0 {
+        Some(near)
+    } else if far >= 0.0 {
+        Some(far)
+    } else {
+        None
+    }
+}
+
 fn unproject(inverse_view_proj: Mat4, position: Vec3) -> Option<Vec3> {
     let world_position = inverse_view_proj * Vec4::new(position.x, position.y, position.z, 1.0);
     if !world_position.is_finite() || world_position.w.abs() <= f32::EPSILON {
