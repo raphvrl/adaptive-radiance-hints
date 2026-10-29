@@ -21,11 +21,16 @@ struct Instance {
     @location(6) normal_0: vec4f,
     @location(7) normal_1: vec4f,
     @location(8) normal_2: vec4f,
+
+    @location(9) albedo: vec4f,
+    @location(10) emission: vec4f,
 }
 
 struct VertexOutput {
     @builtin(position) position: vec4f,
     @location(0) normal: vec3f,
+    @location(1) albedo: vec3f,
+    @location(2) emission: vec3f,
 }
 
 @vertex
@@ -47,6 +52,8 @@ fn vs_main(vertex: VertexInput, instance: Instance) -> VertexOutput {
 
     output.position = frame.view_proj * model * vec4f(vertex.position, 1.0);
     output.normal = normal_matrix * vertex.normal;
+    output.albedo = instance.albedo.rgb;
+    output.emission = instance.emission.rgb;
 
     return output;
 }
@@ -54,7 +61,7 @@ fn vs_main(vertex: VertexInput, instance: Instance) -> VertexOutput {
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4f {
     let light_dir = normalize(vec3f(0.4, 0.7, 0.5));
-    let light = 0.2 + 0.8 * max(dot(normalize(input.normal), light_dir), 0.0);
-    let color = vec3f(0.2, 0.65, 0.95) * light;
+    let light = 0.32 + 0.68 * max(dot(normalize(input.normal), light_dir), 0.0);
+    let color = input.albedo * light + input.emission;
     return vec4f(color, 1.0);
 }

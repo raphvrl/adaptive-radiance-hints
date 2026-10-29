@@ -1,7 +1,11 @@
 use crate::editor::TransformMode;
 
-pub fn show(root_ui: &mut egui::Ui, current_mode: TransformMode) -> (bool, Option<TransformMode>) {
+pub fn show(
+    root_ui: &mut egui::Ui,
+    current_mode: TransformMode,
+) -> (bool, bool, Option<TransformMode>) {
     let mut quit_requested = false;
+    let mut save_requested = false;
     let mut mode = current_mode;
 
     egui::Panel::top("main_menu_bar")
@@ -9,6 +13,10 @@ pub fn show(root_ui: &mut egui::Ui, current_mode: TransformMode) -> (bool, Optio
         .show(root_ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
+                    if ui.button("Save Scene").clicked() {
+                        save_requested = true;
+                        ui.close();
+                    }
                     if ui.button("Quit").clicked() {
                         quit_requested = true;
                     }
@@ -30,5 +38,5 @@ pub fn show(root_ui: &mut egui::Ui, current_mode: TransformMode) -> (bool, Optio
         });
 
     let changed_mode = (mode != current_mode).then_some(mode);
-    (quit_requested, changed_mode)
+    (quit_requested, save_requested, changed_mode)
 }

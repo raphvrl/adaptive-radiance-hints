@@ -6,7 +6,7 @@ use winit::{
     application::ApplicationHandler,
     event::{DeviceEvent, DeviceId, ElementState, StartCause, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, DeviceEvents, EventLoop},
-    keyboard::PhysicalKey,
+    keyboard::{KeyCode, PhysicalKey},
     window::{Window, WindowId},
 };
 
@@ -85,10 +85,12 @@ impl ApplicationHandler for App {
             _ => None,
         };
 
-        if let Some((button, button_state)) = button_event
-            && (!ui_response.consumed || button_state == ElementState::Released)
-        {
-            state.set_input_button(button, button_state == ElementState::Pressed);
+        if let Some((button, button_state)) = button_event {
+            let escape_pressed = button == InputButton::Key(KeyCode::Escape)
+                && button_state == ElementState::Pressed;
+            if !ui_response.consumed || button_state == ElementState::Released || escape_pressed {
+                state.set_input_button(button, button_state == ElementState::Pressed);
+            }
         }
 
         match event {

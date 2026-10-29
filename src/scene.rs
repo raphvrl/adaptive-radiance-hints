@@ -1,61 +1,51 @@
 pub mod components;
+pub mod format;
+pub mod io;
+pub mod materials;
 pub mod picking;
 pub mod systems;
 
 use anyhow::{Context, Result, ensure};
-use components::{Camera, Controller, Mesh, Transform};
+use components::{Camera, MaterialRef, Mesh, Transform};
 use glam::{Mat4, Vec3};
 use hecs::Entity;
 
 use crate::{handle::MeshHandle, input::Input};
+use materials::MaterialLibrary;
 
 pub struct MeshInstance {
     pub mesh: MeshHandle,
     pub model: Mat4,
+    pub albedo: Vec3,
+    pub emission: Vec3,
     pub selected: bool,
 }
 
 #[derive(Default)]
 pub struct Scene {
     pub world: hecs::World,
+    pub materials: MaterialLibrary,
 }
 
 impl Scene {
-    pub fn new(cube_mesh: MeshHandle) -> Self {
-        let mut scene = Self::default();
-
-        scene.world.spawn((
-            Camera {
-                fovy: 60.0_f32.to_radians(),
-                near: 0.1,
-                far: 100.0,
-            },
-            Controller::default(),
-            Transform::from_xyz(0.0, 0.0, 3.0),
-        ));
-
-        scene.world.spawn((
-            Mesh { handle: cube_mesh },
-            Transform::from_xyz(-0.75, 0.0, 0.0),
-        ));
-
-        scene.world.spawn((
-            Mesh { handle: cube_mesh },
-            Transform::from_xyz(0.75, 0.0, 0.0),
-        ));
-
-        scene
-    }
-
     pub fn mesh_instances(&self, selected: Option<Entity>) -> Vec<MeshInstance> {
-        let mut query = self.world.query::<(Entity, &Mesh, &Transform)>();
+        let mut query = self
+            .world
+            .query::<(Entity, &Mesh, &Transform, Option<&MaterialRef>)>();
 
         query
             .iter()
-            .map(|(entity, mesh, transform)| MeshInstance {
-                mesh: mesh.handle,
-                model: model_matrix(transform),
-                selected: selected == Some(entity),
+            .map(|(entity, mesh, transform, material_ref)| {
+                let material =
+                    material_ref.and_then(|material_ref| self.materials.get(&material_ref.0));
+
+                MeshInstance {
+                    mesh: mesh.handle,
+                    model: model_matrix(transform),
+                    albedo: material.map_or(Vec3::ONE, |material| material.albedo),
+                    emission: material.map_or(Vec3::ZERO, |material| material.emission),
+                    selected: selected == Some(entity),
+                }
             })
             .collect()
     }

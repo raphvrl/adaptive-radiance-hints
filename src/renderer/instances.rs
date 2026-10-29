@@ -11,16 +11,20 @@ use crate::{handle::MeshHandle, scene::MeshInstance};
 pub struct InstanceRaw {
     model: [[f32; 4]; 4],
     normal: [[f32; 4]; 3],
+    albedo: [f32; 4],
+    emission: [f32; 4],
 }
 
-const ATTRIBUTES: [wgpu::VertexAttribute; 7] = wgpu::vertex_attr_array![
+const ATTRIBUTES: [wgpu::VertexAttribute; 9] = wgpu::vertex_attr_array![
     2 => Float32x4,
     3 => Float32x4,
     4 => Float32x4,
     5 => Float32x4,
     6 => Float32x4,
     7 => Float32x4,
-    8 => Float32x4
+    8 => Float32x4,
+    9 => Float32x4,
+    10 => Float32x4
 ];
 
 impl InstanceRaw {
@@ -30,7 +34,7 @@ impl InstanceRaw {
         attributes: &ATTRIBUTES,
     };
 
-    fn from_model(model: Mat4) -> Result<Self> {
+    fn from_model(model: Mat4, albedo: glam::Vec3, emission: glam::Vec3) -> Result<Self> {
         let linear = Mat3::from_mat4(model);
         let determinant = linear.determinant();
 
@@ -48,6 +52,8 @@ impl InstanceRaw {
                 [normal[1][0], normal[1][1], normal[1][2], 0.0],
                 [normal[2][0], normal[2][1], normal[2][2], 0.0],
             ],
+            albedo: [albedo.x, albedo.y, albedo.z, 1.0],
+            emission: [emission.x, emission.y, emission.z, 1.0],
         })
     }
 }
@@ -82,13 +88,14 @@ impl InstanceBuffer {
     ) -> Result<Vec<MeshBatch>> {
         u32::try_from(renderables.len()).context("too many mesh instances")?;
 
-        let mut groups = BTreeMap::<MeshHandle, Vec<Mat4>>::new();
+        let mut groups = BTreeMap::<MeshHandle, Vec<(Mat4, glam::Vec3, glam::Vec3)>>::new();
 
         for instance in renderables {
-            groups
-                .entry(instance.mesh)
-                .or_default()
-                .push(instance.model);
+            groups.entry(instance.mesh).or_default().push((
+                instance.model,
+                instance.albedo,
+                instance.emission,
+            ));
         }
 
         let mut instances = Vec::with_capacity(renderables.len());
@@ -99,8 +106,8 @@ impl InstanceBuffer {
                 u32::try_from(instances.len()).context("too many mesh instances")?;
             let instance_count = u32::try_from(models.len()).context("too many mesh instances")?;
 
-            for model in models {
-                instances.push(InstanceRaw::from_model(model)?);
+            for (model, albedo, emission) in models {
+                instances.push(InstanceRaw::from_model(model, albedo, emission)?);
             }
 
             batches.push(MeshBatch {

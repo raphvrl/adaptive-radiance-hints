@@ -18,6 +18,9 @@ glam = { version = "0.34.1", features = ["encase-013"] }
 
 anyhow = "1.0.104"
 
+serde = { version = "1.0.229", features = ["derive"] }
+ron = "0.12.3"
+
 wesl-core = "0.1.0"
 
 hecs = "0.11.2"

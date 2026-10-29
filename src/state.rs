@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use anyhow::Result;
 use glam::{Mat4, Vec2};
@@ -15,8 +15,12 @@ use crate::{
     gpu::Gpu,
     input::{Input, InputButton},
     renderer::Renderer,
-    scene::{Scene, picking},
-    ui::{Ui, UiResponse},
+    scene::{
+        Scene,
+        components::{MaterialRef, Name},
+        picking,
+    },
+    ui::{MaterialEdit, MaterialInspectorData, Ui, UiResponse},
 };
 
 pub struct State {
@@ -28,6 +32,7 @@ pub struct State {
     editor: EditorState,
     renderer: Renderer,
     ui: Ui,
+    scene_path: PathBuf,
 }
 
 impl State {
@@ -43,7 +48,12 @@ impl State {
 
         let cube_mesh = renderer.register_mesh(gpu.device(), &crate::renderer::meshes::cube())?;
 
-        let scene = Scene::new(cube_mesh);
+        let mesh_assets = HashMap::from([("builtin:cube".to_owned(), cube_mesh)]);
+        let scene_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("scenes")
+            .join("cornell.ron");
+        let scene = crate::scene::io::load_scene(&scene_path, &mesh_assets)?;
 
         let ui = Ui::new(&window, gpu.device(), gpu.surface_format());
 
@@ -56,6 +66,7 @@ impl State {
             editor: EditorState::default(),
             renderer,
             ui,
+            scene_path,
         })
     }
 
@@ -100,6 +111,7 @@ impl State {
             (InputButton::Key(KeyCode::Digit3), true) => {
                 self.editor.set_mode(TransformMode::Rotate)
             }
+            (InputButton::Key(KeyCode::Escape), true) => self.editor.select(None),
             (InputButton::Mouse(MouseButton::Left), true) => self.select_or_begin_drag(),
             (InputButton::Mouse(MouseButton::Left), false) => self.editor.end_drag(),
             _ => {}
@@ -147,9 +159,23 @@ impl State {
         let size = self.window.inner_size();
         let aspect_ratio = size.width as f32 / size.height as f32;
         let view_proj = self.scene.camera_view_projection(aspect_ratio)?;
-        let mut ui_frame = self.ui.run(&self.window, self.editor.mode());
+        let material = self.selected_material_inspector();
+        let mut ui_frame = self.ui.run(&self.window, self.editor.mode(), material);
         if let Some(mode) = ui_frame.response.transform_mode {
             self.editor.set_mode(mode);
+        }
+        if let Some(edit) = ui_frame.response.material_edit.take() {
+            self.apply_material_edit(edit);
+        }
+        if ui_frame.response.save_requested {
+            match crate::scene::io::save_scene(&self.scene_path, &self.scene) {
+                Ok(()) => tracing::info!(path = %self.scene_path.display(), "scene saved"),
+                Err(error) => tracing::error!(
+                    error = %format!("{error:#}"),
+                    path = %self.scene_path.display(),
+                    "failed to save scene"
+                ),
+            }
         }
         let renderables = self.scene.mesh_instances(self.editor.selected_entity());
         let gizmo_draw = self.editor.gizmo_draw(&self.scene, size.height as f32);
@@ -232,6 +258,36 @@ impl State {
 
         self.editor
             .update_drag(&mut self.scene, cursor, viewport, view_proj);
+    }
+
+    fn selected_material_inspector(&self) -> Option<MaterialInspectorData> {
+        let entity = self.editor.selected_entity()?;
+        let entity_name = self.scene.world.get::<&Name>(entity).ok()?.0.clone();
+        let material_id = self.scene.world.get::<&MaterialRef>(entity).ok()?.0.clone();
+        let material = *self.scene.materials.get(&material_id)?;
+
+        let mut query = self.scene.world.query::<&MaterialRef>();
+        let users = query
+            .iter()
+            .filter(|material_ref| material_ref.0 == material_id)
+            .count();
+
+        Some(MaterialInspectorData {
+            entity_name,
+            material_id,
+            albedo: material.albedo.to_array(),
+            emission: material.emission.to_array(),
+            users,
+        })
+    }
+
+    fn apply_material_edit(&mut self, edit: MaterialEdit) {
+        let Some(material) = self.scene.materials.get_mut(&edit.material_id) else {
+            return;
+        };
+
+        material.albedo = glam::Vec3::from_array(edit.albedo);
+        material.emission = glam::Vec3::from_array(edit.emission);
     }
 
     fn viewport_and_view_projection(&self) -> Option<(Vec2, Mat4)> {

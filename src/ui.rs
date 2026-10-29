@@ -1,3 +1,4 @@
+mod inspector;
 mod menu;
 mod paint;
 
@@ -6,8 +7,12 @@ use std::time::Duration;
 use crate::editor::TransformMode;
 use winit::{event::WindowEvent, window::Window};
 
+pub use inspector::{MaterialEdit, MaterialInspectorData};
+
 pub struct UiResponse {
     pub quit_requested: bool,
+    pub save_requested: bool,
+    pub material_edit: Option<MaterialEdit>,
     pub repaint_delay: Duration,
     pub transform_mode: Option<TransformMode>,
 }
@@ -58,14 +63,22 @@ impl Ui {
         self.context.egui_wants_pointer_input()
     }
 
-    pub fn run(&mut self, window: &Window, mode: TransformMode) -> UiFrame {
+    pub fn run(
+        &mut self,
+        window: &Window,
+        mode: TransformMode,
+        material: Option<MaterialInspectorData>,
+    ) -> UiFrame {
         let input = self.platform.take_egui_input(window);
 
-        let (mut quit_requested, mut transform_mode) = (false, None);
+        let (mut quit_requested, mut save_requested, mut transform_mode) = (false, false, None);
+        let mut material_edit = None;
         let mut output = self.context.run_ui(input, |root_ui| {
-            let (quit, selected_mode) = menu::show(root_ui, mode);
+            let (quit, save, selected_mode) = menu::show(root_ui, mode);
             quit_requested |= quit;
+            save_requested |= save;
             transform_mode = selected_mode;
+            material_edit = inspector::show(root_ui, material.as_ref());
         });
         self.platform
             .handle_platform_output(window, std::mem::take(&mut output.platform_output));
@@ -79,6 +92,8 @@ impl Ui {
             output,
             response: UiResponse {
                 quit_requested,
+                save_requested,
+                material_edit,
                 repaint_delay,
                 transform_mode,
             },
