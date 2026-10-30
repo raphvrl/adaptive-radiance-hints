@@ -1,4 +1,4 @@
-import super::lighting::shade_surface;
+import package::shared::lighting::shade_surface;
 
 struct FrameUniform {
     view_proj: mat4x4<f32>,
@@ -7,28 +7,6 @@ struct FrameUniform {
 
 @group(0) @binding(0)
 var<uniform> frame: FrameUniform;
-
-struct GpuLight {
-    position: vec3f,
-    range: f32,
-
-    direction: vec3f,
-    inner_cos: f32,
-
-    color: vec3f,
-    intensity: f32,
-
-    outer_cos: f32,
-    is_spot: u32,
-}
-
-struct Lights {
-    length: u32,
-    lights: array<GpuLight>,
-}
-
-@group(1) @binding(0)
-var<storage, read> light_buffer: Lights;
 
 struct VertexInput {
     @location(0) position: vec3f,
