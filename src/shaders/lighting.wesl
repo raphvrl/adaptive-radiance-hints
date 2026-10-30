@@ -1,5 +1,3 @@
-const AMBIENT_STRENGTH: f32 = 0.1;
-
 struct GpuLight {
     position: vec3f,
     range: f32,
@@ -79,13 +77,19 @@ fn direct_lighting(world_position: vec3f, normal: vec3f, albedo: vec3f) -> vec3f
     return color;
 }
 
+fn ambient_lighting(albedo: vec3f, color: vec3f, intensity: f32) -> vec3f {
+    return albedo * color * intensity;
+}
+
 public fn shade_surface(
     world_position: vec3f,
     normal: vec3f,
     albedo: vec3f,
     emission: vec3f,
+    ambient_color: vec3f,
+    ambient_intensity: f32,
 ) -> vec3f {
-    let ambient = albedo * AMBIENT_STRENGTH;
+    let ambient = ambient_lighting(albedo, ambient_color, ambient_intensity);
     let direct = direct_lighting(world_position, normal, albedo);
 
     return emission + ambient + direct;

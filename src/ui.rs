@@ -1,10 +1,14 @@
 mod inspector;
+mod lighting;
 mod menu;
 mod paint;
 
 use std::time::Duration;
 
-use crate::editor::{TransformMode, ViewMode};
+use crate::{
+    editor::ViewMode,
+    renderer::AmbientLighting,
+};
 use winit::{event::WindowEvent, window::Window};
 
 pub use inspector::{LightEdit, LightInspectorData, MaterialEdit, MaterialInspectorData};
@@ -21,8 +25,8 @@ pub struct UiResponse {
     pub add_light: Option<AddLightKind>,
     pub material_edit: Option<MaterialEdit>,
     pub light_edit: Option<LightEdit>,
+    pub ambient_lighting_edit: Option<AmbientLighting>,
     pub repaint_delay: Duration,
-    pub transform_mode: Option<TransformMode>,
     pub view_mode: Option<ViewMode>,
 }
 
@@ -35,6 +39,7 @@ pub struct Ui {
     context: egui::Context,
     platform: egui_winit::State,
     renderer: egui_wgpu::Renderer,
+    show_ambient_window: bool,
 }
 
 impl Ui {
@@ -57,6 +62,7 @@ impl Ui {
             context,
             platform,
             renderer,
+            show_ambient_window: false,
         }
     }
 
@@ -75,30 +81,36 @@ impl Ui {
     pub fn run(
         &mut self,
         window: &Window,
-        mode: TransformMode,
         view_mode: ViewMode,
         material: Option<MaterialInspectorData>,
         light: Option<LightInspectorData>,
+        ambient_lighting: AmbientLighting,
     ) -> UiFrame {
         let input = self.platform.take_egui_input(window);
 
-        let (mut quit_requested, mut save_requested, mut transform_mode, mut add_light) =
-            (false, false, None, None);
+        let (mut quit_requested, mut save_requested, mut add_light) = (false, false, None);
         let mut material_edit = None;
         let mut light_edit = None;
+        let mut ambient_lighting_edit = None;
         let mut view_mode_change = None;
+        let mut show_ambient_window = self.show_ambient_window;
         let mut output = self.context.run_ui(input, |root_ui| {
-            let (quit, save, selected_mode, new_light, selected_view_mode) =
-                menu::show(root_ui, mode, view_mode);
+            let (quit, save, new_light, selected_view_mode) =
+                menu::show(root_ui, view_mode, &mut show_ambient_window);
             quit_requested |= quit;
             save_requested |= save;
-            transform_mode = selected_mode;
             add_light = new_light;
             view_mode_change = selected_view_mode;
 
             material_edit = inspector::show(root_ui, material.as_ref());
             light_edit = inspector::show_light(root_ui, light.as_ref());
+            ambient_lighting_edit = lighting::show_ambient(
+                root_ui,
+                ambient_lighting,
+                &mut show_ambient_window,
+            );
         });
+        self.show_ambient_window = show_ambient_window;
         self.platform
             .handle_platform_output(window, std::mem::take(&mut output.platform_output));
 
@@ -115,8 +127,8 @@ impl Ui {
                 add_light,
                 material_edit,
                 light_edit,
+                ambient_lighting_edit,
                 repaint_delay,
-                transform_mode,
                 view_mode: view_mode_change,
             },
         }

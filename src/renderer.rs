@@ -1,14 +1,16 @@
 mod assets;
 mod bindings;
 mod depth;
+mod hdr;
 mod instances;
 mod lights;
-pub mod mesh;
-pub mod meshes;
 mod passes;
 
+pub mod mesh;
+pub mod meshes;
+
 use anyhow::Result;
-use glam::Mat4;
+use glam::{Mat4, Vec3, Vec4};
 
 use crate::{
     editor::{GizmoDraw, LightMarkerDraw},
@@ -19,15 +21,33 @@ use crate::{
 use assets::MeshAssets;
 use bindings::frame::{FrameBindings, FrameUniform};
 use depth::DepthTarget;
+use hdr::HdrTarget;
 use instances::InstanceBuffer;
 use lights::LightBuffer;
 use mesh::MeshData;
-use passes::{geometry::GeometryPass, gizmo::GizmoPass, selection::SelectionPass};
+use passes::{GeometryPass, GizmoPass, SelectionPass, TonemapPass};
+
+#[derive(Clone, Copy, Debug)]
+pub struct AmbientLighting {
+    pub color: Vec3,
+    pub intensity: f32,
+}
+
+impl Default for AmbientLighting {
+    fn default() -> Self {
+        Self {
+            color: Vec3::ONE,
+            intensity: 0.1,
+        }
+    }
+}
 
 pub struct Renderer {
     frame: FrameBindings,
     lights: LightBuffer,
+    hdr: HdrTarget,
     geometry: GeometryPass,
+    tonemap: TonemapPass,
     selection: SelectionPass,
     gizmo: GizmoPass,
     depth: DepthTarget,
@@ -44,7 +64,9 @@ impl Renderer {
     ) -> Result<Self> {
         let frame = FrameBindings::new(device)?;
         let lights = LightBuffer::new(device)?;
-        let geometry = GeometryPass::new(device, target_format, frame.layout(), lights.layout());
+        let hdr = HdrTarget::new(device, width, height);
+        let geometry = GeometryPass::new(device, hdr::FORMAT, frame.layout(), lights.layout());
+        let tonemap = TonemapPass::new(device, target_format, hdr.view())?;
         let selection = SelectionPass::new(device, target_format, frame.layout());
         let gizmo = GizmoPass::new(device, target_format, frame.layout());
         let depth = DepthTarget::new(device, width, height);
@@ -53,7 +75,9 @@ impl Renderer {
         Ok(Self {
             frame,
             lights,
+            hdr,
             geometry,
+            tonemap,
             selection,
             gizmo,
             depth,
@@ -67,7 +91,13 @@ impl Renderer {
     }
 
     pub fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {
+        if width == 0 || height == 0 {
+            return;
+        }
+
         self.depth.resize(device, width, height);
+        self.hdr.resize(device, width, height);
+        self.tonemap.set_hdr_view(device, self.hdr.view());
     }
 
     pub fn encode(
@@ -80,10 +110,22 @@ impl Renderer {
         renderables: &[MeshInstance],
         point_lights: &[PointLightInstance],
         spot_lights: &[SpotLightInstance],
+        ambient_lighting: AmbientLighting,
         gizmo_draw: Option<GizmoDraw>,
         light_markers: &[LightMarkerDraw],
     ) -> Result<()> {
-        self.frame.write(queue, &FrameUniform { view_proj })?;
+        self.frame.write(
+            queue,
+            &FrameUniform {
+                view_proj,
+                ambient_light: Vec4::new(
+                    ambient_lighting.color.x,
+                    ambient_lighting.color.y,
+                    ambient_lighting.color.z,
+                    ambient_lighting.intensity,
+                ),
+            },
+        )?;
         self.lights
             .write(device, queue, point_lights, spot_lights)?;
         let batches = self.instances.write(device, queue, renderables)?;
@@ -93,7 +135,7 @@ impl Renderer {
 
         self.geometry.encode(
             encoder,
-            view,
+            self.hdr.view(),
             self.depth.view(),
             self.frame.bind_group(),
             self.lights.bind_group(),
@@ -101,6 +143,8 @@ impl Renderer {
             &self.instances,
             &batches,
         )?;
+
+        self.tonemap.encode(encoder, view);
 
         self.selection.encode(
             queue,

@@ -18,7 +18,7 @@ use crate::{
     editor::{EditorState, TransformMode, ViewMode},
     gpu::Gpu,
     input::{Input, InputButton},
-    renderer::Renderer,
+    renderer::{AmbientLighting, Renderer},
     scene::{
         Scene,
         components::{Camera, MaterialRef, Name, PointLight, SpotLight, Transform},
@@ -38,6 +38,7 @@ pub struct State {
     scene: Scene,
     editor: EditorState,
     renderer: Renderer,
+    ambient_lighting: AmbientLighting,
     ui: Ui,
     scene_path: PathBuf,
 }
@@ -72,6 +73,7 @@ impl State {
             scene,
             editor: EditorState::default(),
             renderer,
+            ambient_lighting: AmbientLighting::default(),
             ui,
             scene_path,
         })
@@ -173,15 +175,12 @@ impl State {
             .ui
             .run(
                 &self.window,
-                self.editor.mode(),
                 self.editor.view_mode(),
                 material,
                 light,
+                self.ambient_lighting,
             );
 
-        if let Some(mode) = ui_frame.response.transform_mode {
-            self.editor.set_mode(mode);
-        }
         if let Some(mode) = ui_frame.response.view_mode {
             self.editor.set_view_mode(mode);
         }
@@ -190,6 +189,9 @@ impl State {
         }
         if let Some(edit) = ui_frame.response.light_edit.take() {
             self.apply_light_edit(edit);
+        }
+        if let Some(ambient_lighting) = ui_frame.response.ambient_lighting_edit.take() {
+            self.ambient_lighting = ambient_lighting;
         }
 
         if let Some(kind) = ui_frame.response.add_light.take() {
@@ -238,6 +240,7 @@ impl State {
             &renderables,
             &point_lights,
             &spot_lights,
+            self.ambient_lighting,
             gizmo_draw,
             &light_markers,
         )?;

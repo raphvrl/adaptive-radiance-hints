@@ -2,6 +2,7 @@ import super::lighting::shade_surface;
 
 struct FrameUniform {
     view_proj: mat4x4<f32>,
+    ambient_light: vec4f,
 }
 
 @group(0) @binding(0)
@@ -91,6 +92,8 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4f {
         normal,
         input.albedo,
         input.emission,
+        frame.ambient_light.rgb,
+        frame.ambient_light.a,
     );
     return vec4f(color, 1.0);
 }

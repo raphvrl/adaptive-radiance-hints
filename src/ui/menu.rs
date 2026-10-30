@@ -1,22 +1,20 @@
-use crate::editor::{TransformMode, ViewMode};
+use crate::editor::ViewMode;
 
 use super::AddLightKind;
 
 pub fn show(
     root_ui: &mut egui::Ui,
-    current_mode: TransformMode,
     current_view_mode: ViewMode,
+    show_ambient_window: &mut bool,
 ) -> (
     bool,
     bool,
-    Option<TransformMode>,
     Option<AddLightKind>,
     Option<ViewMode>,
 ) {
     let mut quit_requested = false;
     let mut save_requested = false;
     let mut add_light = None;
-    let mut mode = current_mode;
     let mut view_mode = current_view_mode;
 
     egui::Panel::top("main_menu_bar")
@@ -34,9 +32,6 @@ pub fn show(
                 });
 
                 ui.separator();
-                ui.selectable_value(&mut mode, TransformMode::Translate, "Translate");
-                ui.selectable_value(&mut mode, TransformMode::Rotate, "Rotate");
-                ui.selectable_value(&mut mode, TransformMode::Scale, "Scale");
 
                 ui.menu_button("Create", |ui| {
                     if ui.button("Point Light").clicked() {
@@ -63,6 +58,8 @@ pub fn show(
                     {
                         ui.close();
                     }
+                    ui.separator();
+                    ui.checkbox(show_ambient_window, "Ambient Lighting");
                 });
 
                 ui.menu_button("Help", |ui| {
@@ -76,13 +73,11 @@ pub fn show(
             });
         });
 
-    let changed_mode = (mode != current_mode).then_some(mode);
     let changed_view_mode = (view_mode != current_view_mode).then_some(view_mode);
 
     (
         quit_requested,
         save_requested,
-        changed_mode,
         add_light,
         changed_view_mode,
     )

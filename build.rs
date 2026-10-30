@@ -4,6 +4,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     compile_shader("src/shaders/geometry.wesl", "geometry.wgsl")?;
     compile_shader("src/shaders/selection.wesl", "selection.wgsl")?;
     compile_shader("src/shaders/gizmo.wesl", "gizmo.wgsl")?;
+    compile_shader("src/shaders/tonemap.wesl", "tonemap.wgsl")?;
 
     Ok(())
 }

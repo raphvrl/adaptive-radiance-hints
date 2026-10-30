@@ -2,18 +2,20 @@ use std::num::NonZeroU64;
 
 use anyhow::Result;
 use encase::{ShaderType, UniformBuffer};
-use glam::Mat4;
+use glam::{Mat4, Vec4};
 use wgpu::util::DeviceExt;
 
 #[derive(ShaderType)]
 pub struct FrameUniform {
     pub view_proj: Mat4,
+    pub ambient_light: Vec4,
 }
 
 impl Default for FrameUniform {
     fn default() -> Self {
         Self {
             view_proj: Mat4::IDENTITY,
+            ambient_light: Vec4::new(1.0, 1.0, 1.0, 0.1),
         }
     }
 }
@@ -33,7 +35,7 @@ impl FrameBindings {
             label: Some("Frame bind group layout"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
