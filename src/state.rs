@@ -169,17 +169,16 @@ impl State {
         let size = self.window.inner_size();
         let aspect_ratio = size.width as f32 / size.height as f32;
         let view_proj = self.scene.camera_view_projection(aspect_ratio)?;
+        let shadow_camera = self.scene.shadow_camera(size.height)?;
         let material = self.selected_material_inspector();
         let light = self.selected_light_inspector();
-        let mut ui_frame = self
-            .ui
-            .run(
-                &self.window,
-                self.editor.view_mode(),
-                material,
-                light,
-                self.ambient_lighting,
-            );
+        let mut ui_frame = self.ui.run(
+            &self.window,
+            self.editor.view_mode(),
+            material,
+            light,
+            self.ambient_lighting,
+        );
 
         if let Some(mode) = ui_frame.response.view_mode {
             self.editor.set_view_mode(mode);
@@ -237,6 +236,7 @@ impl State {
             &mut encoder,
             &view,
             view_proj,
+            shadow_camera,
             &renderables,
             &point_lights,
             &spot_lights,
@@ -338,6 +338,9 @@ impl State {
                 range: light.range,
                 inner_angle: light.inner_angle,
                 outer_angle: light.outer_angle,
+                shadow_resolution: self.renderer.shadow_resolution(entity, true),
+                shadow_face_visibility: None,
+                shadow_view_visibility: self.renderer.spot_shadow_visibility(entity),
             });
         }
 
@@ -350,6 +353,9 @@ impl State {
             range: light.range,
             inner_angle: 0.0,
             outer_angle: 0.0,
+            shadow_resolution: self.renderer.shadow_resolution(entity, false),
+            shadow_face_visibility: self.renderer.point_shadow_face_visibility(entity),
+            shadow_view_visibility: None,
         })
     }
 

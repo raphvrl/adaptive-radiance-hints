@@ -24,6 +24,9 @@ pub struct LightInspectorData {
     pub range: f32,
     pub inner_angle: f32,
     pub outer_angle: f32,
+    pub shadow_resolution: Option<u32>,
+    pub shadow_face_visibility: Option<[bool; 6]>,
+    pub shadow_view_visibility: Option<bool>,
 }
 
 pub enum LightEdit {
@@ -137,6 +140,39 @@ pub fn show_light(root_ui: &mut egui::Ui, light: Option<&LightInspectorData>) ->
             });
             ui.separator();
             ui.label(format!("Object: {}", light.entity_name));
+            if let Some(resolution) = light.shadow_resolution {
+                let map_kind = if light.is_spot { "map" } else { "per face" };
+                ui.small(format!(
+                    "Shadow resolution: {resolution} x {resolution} px ({map_kind})"
+                ));
+            } else {
+                ui.small("Shadow resolution: pending");
+            }
+
+            if light.is_spot {
+                let mut visible = light.shadow_view_visibility.unwrap_or(false);
+                ui.add_enabled(
+                    false,
+                    egui::Checkbox::new(&mut visible, "Shadow map"),
+                );
+            } else {
+                let faces = light.shadow_face_visibility.unwrap_or([false; 6]);
+                egui::Grid::new("shadow_face_visibility")
+                    .num_columns(3)
+                    .show(ui, |ui| {
+                        for (index, (face, mut visible)) in
+                            ["+X", "-X", "+Y", "-Y", "+Z", "-Z"]
+                                .into_iter()
+                                .zip(faces)
+                                .enumerate()
+                        {
+                            ui.add_enabled(false, egui::Checkbox::new(&mut visible, face));
+                            if index % 3 == 2 {
+                                ui.end_row();
+                            }
+                        }
+                    });
+            }
 
             ui.horizontal(|ui| {
                 ui.label("Color");

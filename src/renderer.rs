@@ -5,6 +5,7 @@ mod hdr;
 mod instances;
 mod lights;
 mod passes;
+mod shadows;
 
 pub mod mesh;
 pub mod meshes;
@@ -15,7 +16,7 @@ use glam::{Mat4, Vec3, Vec4};
 use crate::{
     editor::{GizmoDraw, LightMarkerDraw},
     handle::MeshHandle,
-    scene::{MeshInstance, PointLightInstance, SpotLightInstance},
+    scene::{MeshInstance, PointLightInstance, ShadowCamera, SpotLightInstance},
 };
 
 use assets::MeshAssets;
@@ -26,6 +27,7 @@ use instances::InstanceBuffer;
 use lights::LightBuffer;
 use mesh::MeshData;
 use passes::{GeometryPass, GizmoPass, SelectionPass, TonemapPass};
+use shadows::{ShadowAtlas, ShadowPass, ShadowPlan};
 
 #[derive(Clone, Copy, Debug)]
 pub struct AmbientLighting {
@@ -51,6 +53,9 @@ pub struct Renderer {
     selection: SelectionPass,
     gizmo: GizmoPass,
     depth: DepthTarget,
+    shadow_atlas: ShadowAtlas,
+    shadow_pass: ShadowPass,
+    last_shadow_plan: Option<ShadowPlan>,
     assets: MeshAssets,
     instances: InstanceBuffer,
 }
@@ -65,11 +70,19 @@ impl Renderer {
         let frame = FrameBindings::new(device)?;
         let lights = LightBuffer::new(device)?;
         let hdr = HdrTarget::new(device, width, height);
-        let geometry = GeometryPass::new(device, hdr::FORMAT, frame.layout(), lights.layout());
+        let shadow_atlas = ShadowAtlas::new(device)?;
+        let geometry = GeometryPass::new(
+            device,
+            hdr::FORMAT,
+            frame.layout(),
+            lights.layout(),
+            shadow_atlas.layout(),
+        );
         let tonemap = TonemapPass::new(device, target_format, hdr.view())?;
         let selection = SelectionPass::new(device, target_format, frame.layout());
         let gizmo = GizmoPass::new(device, target_format, frame.layout());
         let depth = DepthTarget::new(device, width, height);
+        let shadow_pass = ShadowPass::new(device)?;
         let instances = InstanceBuffer::new(device)?;
 
         Ok(Self {
@@ -81,6 +94,9 @@ impl Renderer {
             selection,
             gizmo,
             depth,
+            shadow_atlas,
+            shadow_pass,
+            last_shadow_plan: None,
             assets: MeshAssets::default(),
             instances,
         })
@@ -100,6 +116,22 @@ impl Renderer {
         self.tonemap.set_hdr_view(device, self.hdr.view());
     }
 
+    pub fn shadow_resolution(&self, entity: hecs::Entity, is_spot: bool) -> Option<u32> {
+        self.shadow_atlas.resolution(entity, is_spot)
+    }
+
+    pub fn point_shadow_face_visibility(&self, entity: hecs::Entity) -> Option<[bool; 6]> {
+        self.last_shadow_plan
+            .as_ref()?
+            .point_face_camera_visibility(entity)
+    }
+
+    pub fn spot_shadow_visibility(&self, entity: hecs::Entity) -> Option<bool> {
+        self.last_shadow_plan
+            .as_ref()?
+            .spot_camera_visibility(entity)
+    }
+
     pub fn encode(
         &mut self,
         device: &wgpu::Device,
@@ -107,6 +139,7 @@ impl Renderer {
         encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
         view_proj: Mat4,
+        shadow_camera: ShadowCamera,
         renderables: &[MeshInstance],
         point_lights: &[PointLightInstance],
         spot_lights: &[SpotLightInstance],
@@ -126,12 +159,29 @@ impl Renderer {
                 ),
             },
         )?;
-        self.lights
-            .write(device, queue, point_lights, spot_lights)?;
         let batches = self.instances.write(device, queue, renderables)?;
         let selected_model = renderables
             .iter()
             .find_map(|instance| instance.selected.then_some(instance.model));
+
+        let mut shadow_plan =
+            shadows::build_plan(point_lights, spot_lights, shadow_camera, view_proj)?;
+        self.shadow_atlas
+            .ensure_capacity(device, &mut shadow_plan.views)?;
+        self.shadow_atlas
+            .write_views(device, queue, &shadow_plan.views)?;
+        self.lights
+            .write(device, queue, point_lights, spot_lights, &shadow_plan)?;
+        self.shadow_pass.encode(
+            device,
+            queue,
+            encoder,
+            self.shadow_atlas.view(),
+            &self.assets,
+            &self.instances,
+            &batches,
+            &mut shadow_plan.views,
+        )?;
 
         self.geometry.encode(
             encoder,
@@ -139,6 +189,7 @@ impl Renderer {
             self.depth.view(),
             self.frame.bind_group(),
             self.lights.bind_group(),
+            self.shadow_atlas.bind_group(),
             &self.assets,
             &self.instances,
             &batches,
@@ -164,6 +215,8 @@ impl Renderer {
             gizmo_draw,
             light_markers,
         );
+
+        self.last_shadow_plan = Some(shadow_plan);
 
         Ok(())
     }

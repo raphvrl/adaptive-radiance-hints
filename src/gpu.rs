@@ -45,7 +45,13 @@ impl Gpu {
         let format = capabilities
             .formats
             .iter()
-            .find(|format| format.is_srgb())
+            .find(|format| {
+                matches!(
+                    format,
+                    wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Bgra8Unorm
+                )
+            })
+            .or_else(|| capabilities.formats.iter().find(|format| !format.is_srgb()))
             .or_else(|| capabilities.formats.first())
             .copied()
             .context("surface has no supported texture formats")?;

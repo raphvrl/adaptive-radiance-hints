@@ -140,10 +140,6 @@ impl EditorState {
         self.selected_entity
     }
 
-    pub fn mode(&self) -> TransformMode {
-        self.mode
-    }
-
     pub fn view_mode(&self) -> ViewMode {
         self.view_mode
     }
@@ -210,11 +206,7 @@ impl EditorState {
         })
     }
 
-    pub fn light_marker_draws(
-        &self,
-        scene: &Scene,
-        viewport_height: f32,
-    ) -> Vec<LightMarkerDraw> {
+    pub fn light_marker_draws(&self, scene: &Scene, viewport_height: f32) -> Vec<LightMarkerDraw> {
         let mut query = scene
             .world
             .query::<(Entity, &Transform, Option<&PointLight>, Option<&SpotLight>)>();

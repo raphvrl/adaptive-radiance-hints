@@ -5,6 +5,8 @@ use wgpu::util::DeviceExt;
 
 use crate::scene::{PointLightInstance, SpotLightInstance};
 
+use super::shadows::ShadowPlan;
+
 #[derive(ShaderType)]
 struct GpuLight {
     position: Vec3,
@@ -18,6 +20,7 @@ struct GpuLight {
 
     outer_cos: f32,
     is_spot: u32,
+    shadow_index: u32,
 }
 
 #[derive(ShaderType)]
@@ -50,7 +53,7 @@ impl LightBuffer {
             }],
         });
 
-        let contents = Self::serialize(&[], &[])?;
+        let contents = Self::serialize(&[], &[], None)?;
         let capacity = u64::try_from(contents.len()).context("light buffer size overflow")?;
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Light storage buffer"),
@@ -73,8 +76,9 @@ impl LightBuffer {
         queue: &wgpu::Queue,
         point_lights: &[PointLightInstance],
         spot_lights: &[SpotLightInstance],
+        shadow_plan: &ShadowPlan,
     ) -> Result<()> {
-        let contents = Self::serialize(point_lights, spot_lights)?;
+        let contents = Self::serialize(point_lights, spot_lights, Some(shadow_plan))?;
         let required = u64::try_from(contents.len()).context("light buffer size overflow")?;
         self.ensure_capacity(device, required)?;
         queue.write_buffer(&self.buffer, 0, &contents);
@@ -92,36 +96,49 @@ impl LightBuffer {
     fn serialize(
         point_lights: &[PointLightInstance],
         spot_lights: &[SpotLightInstance],
+        shadow_plan: Option<&ShadowPlan>,
     ) -> Result<Vec<u8>> {
-        let point_lights = point_lights.iter().map(|light| GpuLight {
-            position: light.position,
-            range: light.range,
+        let point_lights = point_lights.iter().map(|light| {
+            Ok(GpuLight {
+                position: light.position,
+                range: light.range,
 
-            direction: Vec3::ZERO,
-            inner_cos: 0.0,
+                direction: Vec3::ZERO,
+                inner_cos: 0.0,
 
-            color: light.color,
-            intensity: light.intensity,
+                color: light.color,
+                intensity: light.intensity,
 
-            outer_cos: 0.0,
-            is_spot: 0,
+                outer_cos: 0.0,
+                is_spot: 0,
+                shadow_index: shadow_plan
+                    .and_then(|plan| plan.point_tile(light.entity))
+                    .context("point light has no shadow atlas allocation")?,
+            })
         });
 
-        let spot_lights = spot_lights.iter().map(|light| GpuLight {
-            position: light.position,
-            range: light.range,
+        let spot_lights = spot_lights.iter().map(|light| {
+            Ok(GpuLight {
+                position: light.position,
+                range: light.range,
 
-            direction: light.direction,
-            inner_cos: light.inner_angle.cos(),
+                direction: light.direction,
+                inner_cos: light.inner_angle.cos(),
 
-            color: light.color,
-            intensity: light.intensity,
+                color: light.color,
+                intensity: light.intensity,
 
-            outer_cos: light.outer_angle.cos(),
-            is_spot: 1,
+                outer_cos: light.outer_angle.cos(),
+                is_spot: 1,
+                shadow_index: shadow_plan
+                    .and_then(|plan| plan.spot_tile(light.entity))
+                    .context("spot light has no shadow atlas allocation")?,
+            })
         });
 
-        let lights = point_lights.chain(spot_lights).collect();
+        let lights = point_lights
+            .chain(spot_lights)
+            .collect::<Result<Vec<_>>>()?;
         let lights = Lights {
             length: ArrayLength,
             lights,

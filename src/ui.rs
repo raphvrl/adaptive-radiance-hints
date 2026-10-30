@@ -5,10 +5,7 @@ mod paint;
 
 use std::time::Duration;
 
-use crate::{
-    editor::ViewMode,
-    renderer::AmbientLighting,
-};
+use crate::{editor::ViewMode, renderer::AmbientLighting};
 use winit::{event::WindowEvent, window::Window};
 
 pub use inspector::{LightEdit, LightInspectorData, MaterialEdit, MaterialInspectorData};
@@ -104,11 +101,8 @@ impl Ui {
 
             material_edit = inspector::show(root_ui, material.as_ref());
             light_edit = inspector::show_light(root_ui, light.as_ref());
-            ambient_lighting_edit = lighting::show_ambient(
-                root_ui,
-                ambient_lighting,
-                &mut show_ambient_window,
-            );
+            ambient_lighting_edit =
+                lighting::show_ambient(root_ui, ambient_lighting, &mut show_ambient_window);
         });
         self.show_ambient_window = show_ambient_window;
         self.platform

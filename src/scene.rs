@@ -23,6 +23,7 @@ pub struct MeshInstance {
 
 #[derive(Clone, Copy, Debug)]
 pub struct PointLightInstance {
+    pub entity: Entity,
     pub position: Vec3,
     pub color: Vec3,
     pub intensity: f32,
@@ -31,6 +32,7 @@ pub struct PointLightInstance {
 
 #[derive(Clone, Copy, Debug)]
 pub struct SpotLightInstance {
+    pub entity: Entity,
     pub position: Vec3,
     pub direction: Vec3,
     pub color: Vec3,
@@ -38,6 +40,13 @@ pub struct SpotLightInstance {
     pub range: f32,
     pub inner_angle: f32,
     pub outer_angle: f32,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ShadowCamera {
+    pub position: Vec3,
+    pub fovy: f32,
+    pub viewport_height: u32,
 }
 
 #[derive(Default)]
@@ -70,11 +79,12 @@ impl Scene {
     }
 
     pub fn point_lights(&self) -> Vec<PointLightInstance> {
-        let mut query = self.world.query::<(&PointLight, &Transform)>();
+        let mut query = self.world.query::<(Entity, &PointLight, &Transform)>();
 
         query
             .iter()
-            .map(|(light, transform)| PointLightInstance {
+            .map(|(entity, light, transform)| PointLightInstance {
+                entity,
                 position: transform.translation,
                 color: light.color,
                 intensity: light.intensity,
@@ -84,11 +94,12 @@ impl Scene {
     }
 
     pub fn spot_lights(&self) -> Vec<SpotLightInstance> {
-        let mut query = self.world.query::<(&SpotLight, &Transform)>();
+        let mut query = self.world.query::<(Entity, &SpotLight, &Transform)>();
 
         query
             .iter()
-            .map(|(light, transform)| SpotLightInstance {
+            .map(|(entity, light, transform)| SpotLightInstance {
+                entity,
                 position: transform.translation,
                 direction: (transform.rotation * Vec3::NEG_Z).normalize_or_zero(),
                 color: light.color,
@@ -173,6 +184,25 @@ impl Scene {
         let projection = camera.projection(aspect_ratio)?;
 
         Ok(projection * view)
+    }
+
+    pub fn shadow_camera(&self, viewport_height: u32) -> Result<ShadowCamera> {
+        ensure!(viewport_height > 0, "shadow viewport height must be positive");
+
+        let mut query = self.world.query::<(&Camera, &Transform)>();
+        let mut cameras = query.iter();
+
+        let (camera, transform) = cameras
+            .next()
+            .context("scene has no camera with a Transform")?;
+
+        ensure!(cameras.next().is_none(), "scene has more than one camera");
+
+        Ok(ShadowCamera {
+            position: transform.translation,
+            fovy: camera.fovy,
+            viewport_height,
+        })
     }
 }
 
