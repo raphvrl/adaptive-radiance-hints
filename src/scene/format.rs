@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use crate::scene::materials::MaterialId;
+use crate::scene::{components::POINT_SHADOW_FACE_COUNT, materials::MaterialId};
 
-pub const SCENE_FORMAT_VERSION: u32 = 3;
+pub const SCENE_FORMAT_VERSION: u32 = 4;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -76,6 +76,12 @@ pub struct PointLightData {
     pub color: [f32; 3],
     pub intensity: f32,
     pub range: f32,
+    #[serde(default = "all_point_shadow_faces_enabled")]
+    pub shadow_faces_enabled: [bool; POINT_SHADOW_FACE_COUNT],
+}
+
+fn all_point_shadow_faces_enabled() -> [bool; POINT_SHADOW_FACE_COUNT] {
+    [true; POINT_SHADOW_FACE_COUNT]
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -93,8 +99,8 @@ impl SceneFile {
         use anyhow::{Context, ensure};
 
         ensure!(
-            self.version == 2 || self.version == SCENE_FORMAT_VERSION,
-            "unsupported scene format version {} (supported versions are 2 and {})",
+            (2..=SCENE_FORMAT_VERSION).contains(&self.version),
+            "unsupported scene format version {} (supported versions are 2 through {})",
             self.version,
             SCENE_FORMAT_VERSION
         );

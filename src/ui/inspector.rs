@@ -1,6 +1,9 @@
 use glam::Vec3;
 
-use crate::scene::materials::MaterialId;
+use crate::scene::{
+    components::{POINT_SHADOW_FACE_COUNT, POINT_SHADOW_FACE_NAMES},
+    materials::MaterialId,
+};
 
 pub struct MaterialInspectorData {
     pub entity_name: String,
@@ -25,7 +28,8 @@ pub struct LightInspectorData {
     pub inner_angle: f32,
     pub outer_angle: f32,
     pub shadow_resolution: Option<u32>,
-    pub shadow_face_visibility: Option<[bool; 6]>,
+    pub shadow_faces_enabled: Option<[bool; POINT_SHADOW_FACE_COUNT]>,
+    pub shadow_face_camera_visibility: Option<[bool; POINT_SHADOW_FACE_COUNT]>,
     pub shadow_view_visibility: Option<bool>,
 }
 
@@ -34,6 +38,7 @@ pub enum LightEdit {
         color: [f32; 3],
         intensity: f32,
         range: f32,
+        shadow_faces_enabled: [bool; POINT_SHADOW_FACE_COUNT],
     },
     Spot {
         color: [f32; 3],
@@ -125,6 +130,9 @@ pub fn show_light(root_ui: &mut egui::Ui, light: Option<&LightInspectorData>) ->
     let mut color = light.color;
     let mut intensity = light.intensity;
     let mut range = light.range;
+    let mut shadow_faces_enabled = light
+        .shadow_faces_enabled
+        .unwrap_or([true; POINT_SHADOW_FACE_COUNT]);
     let mut inner_degrees = light.inner_angle.to_degrees();
     let mut outer_degrees = light.outer_angle.to_degrees();
     let mut changed = false;
@@ -151,27 +159,39 @@ pub fn show_light(root_ui: &mut egui::Ui, light: Option<&LightInspectorData>) ->
 
             if light.is_spot {
                 let mut visible = light.shadow_view_visibility.unwrap_or(false);
-                ui.add_enabled(
-                    false,
-                    egui::Checkbox::new(&mut visible, "Shadow map"),
-                );
+                ui.add_enabled(false, egui::Checkbox::new(&mut visible, "Shadow map"));
             } else {
-                let faces = light.shadow_face_visibility.unwrap_or([false; 6]);
-                egui::Grid::new("shadow_face_visibility")
+                ui.label("Shadow casting faces");
+                egui::Grid::new("point_shadow_faces_enabled")
                     .num_columns(3)
                     .show(ui, |ui| {
-                        for (index, (face, mut visible)) in
-                            ["+X", "-X", "+Y", "-Y", "+Z", "-Z"]
-                                .into_iter()
-                                .zip(faces)
-                                .enumerate()
-                        {
-                            ui.add_enabled(false, egui::Checkbox::new(&mut visible, face));
+                        for (index, face) in POINT_SHADOW_FACE_NAMES.into_iter().enumerate() {
+                            changed |= ui
+                                .checkbox(&mut shadow_faces_enabled[index], face)
+                                .changed();
                             if index % 3 == 2 {
                                 ui.end_row();
                             }
                         }
                     });
+
+                if let Some(camera_visibility) = light.shadow_face_camera_visibility {
+                    ui.label("Faces intersecting the camera frustum");
+                    egui::Grid::new("point_shadow_face_camera_visibility")
+                        .num_columns(3)
+                        .show(ui, |ui| {
+                            for (index, (face, mut visible)) in POINT_SHADOW_FACE_NAMES
+                                .into_iter()
+                                .zip(camera_visibility)
+                                .enumerate()
+                            {
+                                ui.add_enabled(false, egui::Checkbox::new(&mut visible, face));
+                                if index % 3 == 2 {
+                                    ui.end_row();
+                                }
+                            }
+                        });
+                }
             }
 
             ui.horizontal(|ui| {
@@ -221,6 +241,7 @@ pub fn show_light(root_ui: &mut egui::Ui, light: Option<&LightInspectorData>) ->
             color,
             intensity,
             range,
+            shadow_faces_enabled,
         })
     }
 }

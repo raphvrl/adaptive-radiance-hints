@@ -339,7 +339,8 @@ impl State {
                 inner_angle: light.inner_angle,
                 outer_angle: light.outer_angle,
                 shadow_resolution: self.renderer.shadow_resolution(entity, true),
-                shadow_face_visibility: None,
+                shadow_faces_enabled: None,
+                shadow_face_camera_visibility: None,
                 shadow_view_visibility: self.renderer.spot_shadow_visibility(entity),
             });
         }
@@ -354,7 +355,8 @@ impl State {
             inner_angle: 0.0,
             outer_angle: 0.0,
             shadow_resolution: self.renderer.shadow_resolution(entity, false),
-            shadow_face_visibility: self.renderer.point_shadow_face_visibility(entity),
+            shadow_faces_enabled: Some(light.shadow_faces_enabled),
+            shadow_face_camera_visibility: self.renderer.point_shadow_face_visibility(entity),
             shadow_view_visibility: None,
         })
     }
@@ -369,11 +371,13 @@ impl State {
                 color,
                 intensity,
                 range,
+                shadow_faces_enabled,
             } => {
                 if let Ok(mut light) = self.scene.world.get::<&mut PointLight>(entity) {
                     light.color = Vec3::from_array(color);
                     light.intensity = intensity;
                     light.range = range;
+                    light.shadow_faces_enabled = shadow_faces_enabled;
                 }
             }
 

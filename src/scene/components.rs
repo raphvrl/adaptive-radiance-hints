@@ -8,7 +8,7 @@ pub mod transform;
 
 pub use camera::Camera;
 pub use controller::Controller;
-pub use light::{PointLight, SpotLight};
+pub use light::{POINT_SHADOW_FACE_COUNT, POINT_SHADOW_FACE_NAMES, PointLight, SpotLight};
 pub use material::MaterialRef;
 pub use mesh::Mesh;
 pub use name::Name;

@@ -10,7 +10,7 @@ pub fn show(
     let mut quit_requested = false;
     let mut save_requested = false;
     let mut add_light = None;
-    let mut view_mode = current_view_mode;
+    let mut show_light_markers = current_view_mode == ViewMode::LightMarkers;
 
     egui::Panel::top("main_menu_bar")
         .frame(egui::Frame::side_top_panel(root_ui.style()))
@@ -40,18 +40,7 @@ pub fn show(
                 });
 
                 ui.menu_button("View", |ui| {
-                    if ui
-                        .selectable_value(&mut view_mode, ViewMode::Scene, "Scene")
-                        .clicked()
-                    {
-                        ui.close();
-                    }
-                    if ui
-                        .selectable_value(&mut view_mode, ViewMode::LightMarkers, "Light Markers")
-                        .clicked()
-                    {
-                        ui.close();
-                    }
+                    ui.checkbox(&mut show_light_markers, "Light Markers");
                     ui.separator();
                     ui.checkbox(show_ambient_window, "Ambient Lighting");
                 });
@@ -67,6 +56,11 @@ pub fn show(
             });
         });
 
+    let view_mode = if show_light_markers {
+        ViewMode::LightMarkers
+    } else {
+        ViewMode::Scene
+    };
     let changed_view_mode = (view_mode != current_view_mode).then_some(view_mode);
 
     (quit_requested, save_requested, add_light, changed_view_mode)

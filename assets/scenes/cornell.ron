@@ -1,10 +1,10 @@
 (
-    version: 3,
+    version: 4,
     materials: [
         (
             id: "area_light",
-            albedo: (1.0, 0.96, 0.86),
-            emission: (2.0, 1.8, 1.45),
+            albedo: (1.0, 0.96000004, 0.86),
+            emission: (100.0, 100.0, 100.0),
         ),
         (
             id: "cornell_green",
@@ -42,8 +42,8 @@
         (
             name: "Camera",
             transform: (
-                translation: (0.29862657, 1.6749105, 4.0287414),
-                rotation_xyzw: (-0.071932174, 0.005151821, 0.00037154913, 0.9973962),
+                translation: (0.03441885, 2.1940506, 5.051166),
+                rotation_xyzw: (0.105791844, 0.009778615, 0.0010403866, -0.9943397),
                 scale: (1.0, 1.0, 1.0),
             ),
             mesh: None,
@@ -56,8 +56,8 @@
             controller: Some((
                 move_speed: 3.0,
                 look_sensitivity: 0.002,
-                yaw: 0.010330449,
-                pitch: -0.14399064,
+                yaw: 6.2635174,
+                pitch: -0.21199064,
             )),
             point_light: None,
             spot_light: None,
@@ -130,7 +130,7 @@
             name: "PointLight1",
             transform: (
                 translation: (0.008122906, 2.4295592, -0.14738584),
-                rotation_xyzw: (0.033982027, 0.02219442, 0.0007548337, -0.99917567),
+                rotation_xyzw: (0.03398203, 0.022194423, 0.00075483375, -0.9991757),
                 scale: (1.0, 1.0, 1.0),
             ),
             mesh: None,
@@ -141,6 +141,7 @@
                 color: (1.0, 1.0, 1.0),
                 intensity: 3.0,
                 range: 8.0,
+                shadow_faces_enabled: (false, false, false, true, false, false),
             )),
             spot_light: None,
         ),

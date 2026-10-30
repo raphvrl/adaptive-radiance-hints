@@ -6,7 +6,9 @@ pub mod picking;
 pub mod systems;
 
 use anyhow::{Context, Result, ensure};
-use components::{Camera, MaterialRef, Mesh, PointLight, SpotLight, Transform};
+use components::{
+    Camera, MaterialRef, Mesh, POINT_SHADOW_FACE_COUNT, PointLight, SpotLight, Transform,
+};
 use glam::{Mat4, Vec3};
 use hecs::Entity;
 
@@ -28,6 +30,7 @@ pub struct PointLightInstance {
     pub color: Vec3,
     pub intensity: f32,
     pub range: f32,
+    pub shadow_faces_enabled: [bool; POINT_SHADOW_FACE_COUNT],
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -89,6 +92,7 @@ impl Scene {
                 color: light.color,
                 intensity: light.intensity,
                 range: light.range,
+                shadow_faces_enabled: light.shadow_faces_enabled,
             })
             .collect()
     }

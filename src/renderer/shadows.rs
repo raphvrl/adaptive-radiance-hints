@@ -20,7 +20,9 @@ use crate::{
         instances::{InstanceBuffer, InstanceRaw, MeshBatch},
         mesh::MeshVertex,
     },
-    scene::{PointLightInstance, ShadowCamera, SpotLightInstance},
+    scene::{
+        PointLightInstance, ShadowCamera, SpotLightInstance, components::POINT_SHADOW_FACE_COUNT,
+    },
 };
 
 const INITIAL_ATLAS_SIZE: u32 = 512;
@@ -143,6 +145,7 @@ pub struct ShadowView {
     pub tile_index: u32,
     pub view_proj: Mat4,
     camera_visible: bool,
+    enabled: bool,
     key: ShadowKey,
     resolution: u32,
     tile_size: u32,
@@ -194,9 +197,12 @@ impl ShadowPlan {
         self.spot_tiles.get(&entity).copied()
     }
 
-    pub fn point_face_camera_visibility(&self, entity: Entity) -> Option<[bool; 6]> {
+    pub fn point_face_camera_visibility(
+        &self,
+        entity: Entity,
+    ) -> Option<[bool; POINT_SHADOW_FACE_COUNT]> {
         let first_view = usize::try_from(*self.point_tiles.get(&entity)?).ok()?;
-        let end_view = first_view.checked_add(6)?;
+        let end_view = first_view.checked_add(POINT_SHADOW_FACE_COUNT)?;
         let views = self.views.get(first_view..end_view)?;
 
         Some(std::array::from_fn(|index| views[index].camera_visible))
@@ -631,7 +637,7 @@ impl ShadowPass {
         pass.set_vertex_buffer(1, instances.buffer().slice(..));
 
         for view in views {
-            if !view.camera_visible {
+            if !view.enabled || !view.camera_visible {
                 continue;
             }
 
@@ -786,7 +792,7 @@ pub fn build_plan(
     let camera_frustum = ClipFrustum::from_view_proj(camera_view_proj)?;
     let capacity = point_lights
         .len()
-        .checked_mul(6)
+        .checked_mul(POINT_SHADOW_FACE_COUNT)
         .and_then(|count| count.checked_add(spot_lights.len()))
         .context("shadow view count overflow")?;
     let mut views = Vec::with_capacity(capacity);
@@ -794,6 +800,7 @@ pub fn build_plan(
     let mut spot_tiles = HashMap::with_capacity(spot_lights.len());
     let mut tile_index = 0;
 
+    // Keep this order aligned with the point light face settings and shader face selection.
     let point_faces = [
         (Vec3::X, -Vec3::Y),
         (-Vec3::X, -Vec3::Y),
@@ -819,7 +826,7 @@ pub fn build_plan(
         let key = ShadowKey::Point(light.entity);
         point_tiles.insert(light.entity, tile_index);
 
-        for (direction, up) in point_faces {
+        for (face_index, (direction, up)) in point_faces.into_iter().enumerate() {
             let view_proj = projection * view::look_to_mat4(light.position, direction, up);
             push_view(
                 &mut views,
@@ -827,6 +834,7 @@ pub fn build_plan(
                 key,
                 demand,
                 &camera_frustum,
+                light.shadow_faces_enabled[face_index],
                 &mut tile_index,
             )?;
         }
@@ -866,6 +874,7 @@ pub fn build_plan(
             ShadowKey::Spot(light.entity),
             demand,
             &camera_frustum,
+            true,
             &mut tile_index,
         )?;
     }
@@ -883,6 +892,7 @@ fn push_view(
     key: ShadowKey,
     demand: ShadowResolutionDemand,
     camera_frustum: &ClipFrustum,
+    enabled: bool,
     tile_index: &mut u32,
 ) -> Result<()> {
     let light_frustum = ClipFrustum::from_view_proj(view_proj)?;
@@ -890,6 +900,7 @@ fn push_view(
         tile_index: *tile_index,
         view_proj,
         camera_visible: camera_frustum.intersects(light_frustum),
+        enabled,
         key,
         resolution: demand.resolution,
         tile_size: demand.tile_size,

@@ -94,6 +94,7 @@ pub fn load_scene(path: &Path, mesh_assets: &HashMap<String, MeshHandle>) -> Res
                     color: Vec3::from_array(light.color),
                     intensity: light.intensity,
                     range: light.range,
+                    shadow_faces_enabled: light.shadow_faces_enabled,
                 },
             )?;
         }
@@ -157,6 +158,7 @@ pub fn save_scene(path: &Path, scene: &Scene) -> Result<()> {
                         color: light.color.to_array(),
                         intensity: light.intensity,
                         range: light.range,
+                        shadow_faces_enabled: light.shadow_faces_enabled,
                     }),
                     spot_light: spot_light.map(|light| SpotLightData {
                         color: light.color.to_array(),
