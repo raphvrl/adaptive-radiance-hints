@@ -1,6 +1,4 @@
-import super::palette::vertex_color;
-
-const AMBIENT_STRENGTH: f32 = 0.1;
+import super::lighting::shade_surface;
 
 struct FrameUniform {
     view_proj: mat4x4<f32>,
@@ -88,41 +86,11 @@ fn vs_main(vertex: VertexInput, instance: Instance) -> VertexOutput {
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4f {
     let normal = normalize(input.normal);
-    var color = input.emission + input.albedo * AMBIENT_STRENGTH;
-
-    for (var i = 0u; i < light_buffer.length; i += 1u) {
-        let light = light_buffer.lights[i];
-        let to_light = light.position - input.world_position;
-        let light_distance = length(to_light);
-        let range = light.range;
-
-        if light_distance > 0.0001 && light_distance < range {
-            let direction_to_light = to_light / light_distance;
-            let diffuse = max(dot(normal, direction_to_light), 0.0);
-            let range_falloff = 1.0 - light_distance / range;
-            let attenuation = range_falloff * range_falloff / (1.0 + light_distance * light_distance);
-            var spot_factor = 1.0;
-
-            if light.is_spot != 0u {
-                let cosine = dot(-direction_to_light, normalize(light.direction));
-                let inner_cos = light.inner_cos;
-                let outer_cos = light.outer_cos;
-                let cone = clamp(
-                    (cosine - outer_cos) / max(inner_cos - outer_cos, 0.0001),
-                    0.0,
-                    1.0,
-                );
-                spot_factor = cone * cone * (3.0 - 2.0 * cone);
-            }
-
-            color += input.albedo
-                * light.color
-                * light.intensity
-                * diffuse
-                * attenuation
-                * spot_factor;
-        }
-    }
-
+    let color = shade_surface(
+        input.world_position,
+        normal,
+        input.albedo,
+        input.emission,
+    );
     return vec4f(color, 1.0);
 }
