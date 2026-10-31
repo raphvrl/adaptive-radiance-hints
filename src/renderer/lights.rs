@@ -21,6 +21,9 @@ struct GpuLight {
     outer_cos: f32,
     is_spot: u32,
     shadow_index: u32,
+    shadow_normal_bias: f32,
+    shadow_resolution: u32,
+    shadow_bias: f32,
 }
 
 #[derive(ShaderType)]
@@ -114,6 +117,9 @@ impl LightBuffer {
                 shadow_index: shadow_plan
                     .and_then(|plan| plan.point_tile(light.entity))
                     .context("point light has no shadow atlas allocation")?,
+                shadow_normal_bias: light.shadow_normal_bias,
+                shadow_resolution: light.shadow_resolution,
+                shadow_bias: light.shadow_bias,
             })
         });
 
@@ -133,6 +139,9 @@ impl LightBuffer {
                 shadow_index: shadow_plan
                     .and_then(|plan| plan.spot_tile(light.entity))
                     .context("spot light has no shadow atlas allocation")?,
+                shadow_normal_bias: light.shadow_normal_bias,
+                shadow_resolution: light.shadow_resolution,
+                shadow_bias: light.shadow_bias,
             })
         });
 
@@ -185,3 +194,4 @@ impl LightBuffer {
         })
     }
 }
+

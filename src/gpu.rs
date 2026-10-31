@@ -25,7 +25,7 @@ impl Gpu {
                 power_preference: wgpu::PowerPreference::default(),
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
-                apply_limit_buckets: true,
+                apply_limit_buckets: false,
             })
             .await
             .context("failed to find a compatible graphics adapter")?;
@@ -34,7 +34,7 @@ impl Gpu {
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("GPU device"),
                 required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::default(),
+                required_limits: adapter.limits(),
                 memory_hints: wgpu::MemoryHints::Performance,
                 ..Default::default()
             })

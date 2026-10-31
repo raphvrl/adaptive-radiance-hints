@@ -1,7 +1,10 @@
 use glam::Vec3;
 
 use crate::scene::{
-    components::{POINT_SHADOW_FACE_COUNT, POINT_SHADOW_FACE_NAMES},
+    components::{
+        MAX_SHADOW_BIAS, MAX_SHADOW_NORMAL_BIAS, POINT_SHADOW_FACE_COUNT,
+        POINT_SHADOW_FACE_NAMES, SHADOW_RESOLUTION_OPTIONS,
+    },
     materials::MaterialId,
 };
 
@@ -27,7 +30,9 @@ pub struct LightInspectorData {
     pub range: f32,
     pub inner_angle: f32,
     pub outer_angle: f32,
-    pub shadow_resolution: Option<u32>,
+    pub shadow_resolution: u32,
+    pub shadow_bias: f32,
+    pub shadow_normal_bias: f32,
     pub shadow_faces_enabled: Option<[bool; POINT_SHADOW_FACE_COUNT]>,
     pub shadow_face_camera_visibility: Option<[bool; POINT_SHADOW_FACE_COUNT]>,
     pub shadow_view_visibility: Option<bool>,
@@ -38,12 +43,18 @@ pub enum LightEdit {
         color: [f32; 3],
         intensity: f32,
         range: f32,
+        shadow_resolution: u32,
+        shadow_bias: f32,
+        shadow_normal_bias: f32,
         shadow_faces_enabled: [bool; POINT_SHADOW_FACE_COUNT],
     },
     Spot {
         color: [f32; 3],
         intensity: f32,
         range: f32,
+        shadow_resolution: u32,
+        shadow_bias: f32,
+        shadow_normal_bias: f32,
         inner_angle: f32,
         outer_angle: f32,
     },
@@ -130,6 +141,9 @@ pub fn show_light(root_ui: &mut egui::Ui, light: Option<&LightInspectorData>) ->
     let mut color = light.color;
     let mut intensity = light.intensity;
     let mut range = light.range;
+    let mut shadow_resolution = light.shadow_resolution;
+    let mut shadow_bias = light.shadow_bias;
+    let mut shadow_normal_bias = light.shadow_normal_bias;
     let mut shadow_faces_enabled = light
         .shadow_faces_enabled
         .unwrap_or([true; POINT_SHADOW_FACE_COUNT]);
@@ -148,14 +162,36 @@ pub fn show_light(root_ui: &mut egui::Ui, light: Option<&LightInspectorData>) ->
             });
             ui.separator();
             ui.label(format!("Object: {}", light.entity_name));
-            if let Some(resolution) = light.shadow_resolution {
-                let map_kind = if light.is_spot { "map" } else { "per face" };
-                ui.small(format!(
-                    "Shadow resolution: {resolution} x {resolution} px ({map_kind})"
-                ));
+            egui::ComboBox::from_label(if light.is_spot {
+                "Shadow map resolution"
             } else {
-                ui.small("Shadow resolution: pending");
-            }
+                "Shadow face resolution"
+            })
+            .selected_text(format!("{shadow_resolution} x {shadow_resolution} px"))
+            .show_ui(ui, |ui| {
+                for resolution in SHADOW_RESOLUTION_OPTIONS {
+                    changed |= ui
+                        .selectable_value(
+                            &mut shadow_resolution,
+                            resolution,
+                            format!("{resolution} x {resolution} px"),
+                        )
+                        .changed();
+                }
+            });
+            changed |= ui
+                .add(
+                    egui::Slider::new(&mut shadow_bias, 0.0..=MAX_SHADOW_BIAS)
+                        .text("Shadow bias")
+                        .max_decimals(3),
+                )
+                .changed();
+            changed |= ui
+                .add(
+                    egui::Slider::new(&mut shadow_normal_bias, 0.0..=MAX_SHADOW_NORMAL_BIAS)
+                        .text("Shadow normal bias (texels)"),
+                )
+                .changed();
 
             if light.is_spot {
                 let mut visible = light.shadow_view_visibility.unwrap_or(false);
@@ -233,6 +269,9 @@ pub fn show_light(root_ui: &mut egui::Ui, light: Option<&LightInspectorData>) ->
             color,
             intensity,
             range,
+            shadow_resolution,
+            shadow_bias,
+            shadow_normal_bias,
             inner_angle: inner_degrees.to_radians(),
             outer_angle: outer_degrees.to_radians(),
         })
@@ -241,6 +280,9 @@ pub fn show_light(root_ui: &mut egui::Ui, light: Option<&LightInspectorData>) ->
             color,
             intensity,
             range,
+            shadow_resolution,
+            shadow_bias,
+            shadow_normal_bias,
             shadow_faces_enabled,
         })
     }

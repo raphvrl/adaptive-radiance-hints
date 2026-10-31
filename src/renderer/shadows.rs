@@ -1,8 +1,4 @@
-use std::{
-    cmp::Reverse,
-    collections::HashMap,
-    num::NonZeroU64,
-};
+use std::{cmp::Reverse, collections::HashMap, num::NonZeroU64};
 
 use anyhow::{Context, Result, ensure};
 use encase::{ArrayLength, ShaderType, StorageBuffer, UniformBuffer};
@@ -21,18 +17,16 @@ use crate::{
         mesh::MeshVertex,
     },
     scene::{
-        PointLightInstance, ShadowCamera, SpotLightInstance, components::POINT_SHADOW_FACE_COUNT,
+        PointLightInstance, SpotLightInstance,
+        components::{POINT_SHADOW_FACE_COUNT, SHADOW_RESOLUTION_OPTIONS},
     },
 };
 
-const INITIAL_ATLAS_SIZE: u32 = 512;
-const MIN_SHADOW_RESOLUTION: u32 = 128;
-const MAX_SHADOW_RESOLUTION: u32 = 2048;
-const MAX_SCREEN_PIXELS_PER_TEXEL: f32 = 1.0;
+const EMPTY_ATLAS_SIZE: u32 = 1;
+const ATLAS_WIDTH_STEP: u32 = 128;
 const TILE_GUTTER: u32 = 2;
-const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth16Unorm;
 const MIN_NEAR_PLANE: f32 = 0.001;
-const MIN_CAMERA_DISTANCE: f32 = 0.1;
 const FRUSTUM_INTERSECTION_EPSILON: f32 = 0.001;
 const SHADOW_VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 1] =
     wgpu::vertex_attr_array![0 => Float32x3];
@@ -61,10 +55,16 @@ struct ClipFrustum {
 
 impl ClipFrustum {
     fn from_view_proj(view_proj: Mat4) -> Result<Self> {
-        ensure!(view_proj.is_finite(), "frustum view-projection matrix is invalid");
+        ensure!(
+            view_proj.is_finite(),
+            "frustum view-projection matrix is invalid"
+        );
 
         let inverse = view_proj.inverse();
-        ensure!(inverse.is_finite(), "frustum view-projection matrix is singular");
+        ensure!(
+            inverse.is_finite(),
+            "frustum view-projection matrix is singular"
+        );
 
         let corners = [
             Self::unproject_corner(inverse, Vec4::new(-1.0, -1.0, 0.0, 1.0))?,
@@ -146,26 +146,17 @@ pub struct ShadowView {
     pub view_proj: Mat4,
     camera_visible: bool,
     enabled: bool,
-    key: ShadowKey,
     resolution: u32,
     tile_size: u32,
-    required_resolution: f32,
     x: u32,
     y: u32,
     uniform_offset: u32,
 }
 
-#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
-enum ShadowKey {
-    Point(Entity),
-    Spot(Entity),
-}
-
-#[derive(Clone, Copy)]
-struct ShadowResolutionDemand {
-    resolution: u32,
-    tile_size: u32,
-    required: f32,
+impl ShadowView {
+    fn needs_atlas_tile(&self) -> bool {
+        self.enabled && self.camera_visible
+    }
 }
 
 pub struct ShadowAtlas {
@@ -179,7 +170,6 @@ pub struct ShadowAtlas {
     shadow_views_capacity: u64,
     width: u32,
     height: u32,
-    resolution_cache: HashMap<ShadowKey, u32>,
 }
 
 pub struct ShadowPlan {
@@ -211,9 +201,7 @@ impl ShadowPlan {
     pub fn spot_camera_visibility(&self, entity: Entity) -> Option<bool> {
         let view_index = usize::try_from(*self.spot_tiles.get(&entity)?).ok()?;
 
-        self.views
-            .get(view_index)
-            .map(|view| view.camera_visible)
+        self.views.get(view_index).map(|view| view.camera_visible)
     }
 }
 
@@ -221,6 +209,7 @@ impl ShadowPlan {
 struct GpuShadowView {
     view_proj: Mat4,
     atlas_uv: Vec4,
+    has_atlas_tile: u32,
 }
 
 #[derive(ShaderType)]
@@ -269,14 +258,14 @@ impl ShadowAtlas {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Nearest,
-            min_filter: wgpu::FilterMode::Nearest,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
             mipmap_filter: wgpu::MipmapFilterMode::Nearest,
             compare: Some(wgpu::CompareFunction::LessEqual),
             ..Default::default()
         });
 
-        let size = INITIAL_ATLAS_SIZE.min(device.limits().max_texture_dimension_2d);
+        let size = EMPTY_ATLAS_SIZE;
         let (texture, view) = Self::create_texture(device, size, size);
         let shadow_views_contents = Self::serialize_views(size, size, &[])?;
         let shadow_views_capacity = u64::try_from(shadow_views_contents.len())
@@ -298,7 +287,6 @@ impl ShadowAtlas {
             shadow_views_capacity,
             width: size,
             height: size,
-            resolution_cache: HashMap::new(),
         })
     }
 
@@ -307,8 +295,6 @@ impl ShadowAtlas {
         device: &wgpu::Device,
         views: &mut [ShadowView],
     ) -> Result<()> {
-        self.apply_resolution_hysteresis(views);
-
         let (required_width, required_height, placements) = pack_views(
             views,
             self.width,
@@ -343,36 +329,6 @@ impl ShadowAtlas {
         Ok(())
     }
 
-    fn apply_resolution_hysteresis(&mut self, views: &mut [ShadowView]) {
-        let mut resolution_cache = HashMap::with_capacity(self.resolution_cache.len());
-
-        for view in views {
-            let resolution = match self.resolution_cache.get(&view.key).copied() {
-                None => view.resolution,
-                Some(current)
-                    if view.resolution < current
-                        && (view.resolution == MIN_SHADOW_RESOLUTION
-                            || view.required_resolution <= view.resolution as f32 * 0.9) =>
-                {
-                    view.resolution
-                }
-                Some(current)
-                    if view.resolution > current
-                        && view.required_resolution >= current as f32 * 1.1 =>
-                {
-                    view.resolution
-                }
-                Some(current) => current,
-            };
-
-            view.resolution = resolution;
-            view.tile_size = resolution + 2 * TILE_GUTTER;
-            resolution_cache.insert(view.key, resolution);
-        }
-
-        self.resolution_cache = resolution_cache;
-    }
-
     pub fn write_views(
         &mut self,
         device: &wgpu::Device,
@@ -396,16 +352,6 @@ impl ShadowAtlas {
 
     pub fn bind_group(&self) -> &wgpu::BindGroup {
         &self.bind_group
-    }
-
-    pub fn resolution(&self, entity: Entity, is_spot: bool) -> Option<u32> {
-        let key = if is_spot {
-            ShadowKey::Spot(entity)
-        } else {
-            ShadowKey::Point(entity)
-        };
-
-        self.resolution_cache.get(&key).copied()
     }
 
     fn ensure_view_capacity(&mut self, device: &wgpu::Device, required: u64) -> Result<()> {
@@ -448,6 +394,7 @@ impl ShadowAtlas {
                         (view.x + TILE_GUTTER) as f32 / atlas_width,
                         (view.y + TILE_GUTTER) as f32 / atlas_height,
                     ),
+                    has_atlas_tile: if view.needs_atlas_tile() { 1 } else { 0 },
                 }
             })
             .collect();
@@ -585,7 +532,7 @@ impl ShadowPass {
                 depth_write_enabled: Some(true),
                 depth_compare: Some(wgpu::CompareFunction::Less),
                 stencil: Default::default(),
-                bias: Default::default(),
+                bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState::default(),
             fragment: None,
@@ -786,7 +733,6 @@ impl ShadowPass {
 pub fn build_plan(
     point_lights: &[PointLightInstance],
     spot_lights: &[SpotLightInstance],
-    camera: ShadowCamera,
     camera_view_proj: Mat4,
 ) -> Result<ShadowPlan> {
     let camera_frustum = ClipFrustum::from_view_proj(camera_view_proj)?;
@@ -815,15 +761,13 @@ pub fn build_plan(
             light.position.is_finite(),
             "point light position is invalid"
         );
+        ensure!(
+            SHADOW_RESOLUTION_OPTIONS.contains(&light.shadow_resolution),
+            "point light has an unsupported shadow resolution {}",
+            light.shadow_resolution
+        );
         let near = near_plane(light.range)?;
         let projection = directx::perspective(std::f32::consts::FRAC_PI_2, 1.0, near, light.range);
-        let demand = resolution_demand(
-            camera,
-            light.position,
-            light.range,
-            std::f32::consts::FRAC_PI_4,
-        )?;
-        let key = ShadowKey::Point(light.entity);
         point_tiles.insert(light.entity, tile_index);
 
         for (face_index, (direction, up)) in point_faces.into_iter().enumerate() {
@@ -831,8 +775,7 @@ pub fn build_plan(
             push_view(
                 &mut views,
                 view_proj,
-                key,
-                demand,
+                light.shadow_resolution,
                 &camera_frustum,
                 light.shadow_faces_enabled[face_index],
                 &mut tile_index,
@@ -842,6 +785,11 @@ pub fn build_plan(
 
     for light in spot_lights {
         ensure!(light.position.is_finite(), "spot light position is invalid");
+        ensure!(
+            SHADOW_RESOLUTION_OPTIONS.contains(&light.shadow_resolution),
+            "spot light has an unsupported shadow resolution {}",
+            light.shadow_resolution
+        );
         let direction_length_squared = light.direction.length_squared();
         ensure!(
             light.direction.is_finite()
@@ -865,14 +813,12 @@ pub fn build_plan(
         let near = near_plane(light.range)?;
         let projection = directx::perspective(fov, 1.0, near, light.range);
         let view_proj = projection * view::look_to_mat4(light.position, direction, up);
-        let demand = resolution_demand(camera, light.position, light.range, light.outer_angle)?;
 
         spot_tiles.insert(light.entity, tile_index);
         push_view(
             &mut views,
             view_proj,
-            ShadowKey::Spot(light.entity),
-            demand,
+            light.shadow_resolution,
             &camera_frustum,
             true,
             &mut tile_index,
@@ -889,22 +835,21 @@ pub fn build_plan(
 fn push_view(
     views: &mut Vec<ShadowView>,
     view_proj: Mat4,
-    key: ShadowKey,
-    demand: ShadowResolutionDemand,
+    resolution: u32,
     camera_frustum: &ClipFrustum,
     enabled: bool,
     tile_index: &mut u32,
 ) -> Result<()> {
-    let light_frustum = ClipFrustum::from_view_proj(view_proj)?;
+    let camera_visible =
+        enabled && camera_frustum.intersects(ClipFrustum::from_view_proj(view_proj)?);
+
     views.push(ShadowView {
         tile_index: *tile_index,
         view_proj,
-        camera_visible: camera_frustum.intersects(light_frustum),
+        camera_visible,
         enabled,
-        key,
-        resolution: demand.resolution,
-        tile_size: demand.tile_size,
-        required_resolution: demand.required,
+        resolution,
+        tile_size: resolution + 2 * TILE_GUTTER,
         x: 0,
         y: 0,
         uniform_offset: 0,
@@ -915,68 +860,6 @@ fn push_view(
         .context("shadow tile index overflow")?;
 
     Ok(())
-}
-
-fn resolution_demand(
-    camera: ShadowCamera,
-    light_position: Vec3,
-    light_range: f32,
-    light_half_fov: f32,
-) -> Result<ShadowResolutionDemand> {
-    ensure!(
-        camera.position.is_finite() && light_position.is_finite(),
-        "shadow camera or light position is invalid"
-    );
-    ensure!(camera.viewport_height > 0, "shadow viewport height is zero");
-    ensure!(
-        camera.fovy.is_finite()
-            && camera.fovy > 0.0
-            && camera.fovy < std::f32::consts::PI,
-        "shadow camera field of view is invalid"
-    );
-    ensure!(
-        light_range.is_finite()
-            && light_range > 0.0
-            && light_half_fov.is_finite()
-            && light_half_fov > 0.0
-            && light_half_fov < std::f32::consts::FRAC_PI_2,
-        "shadow light projection is invalid"
-    );
-
-    // Use distance to the light as a proxy until visible receiver bounds are available.
-    let camera_distance = camera
-        .position
-        .distance(light_position)
-        .max(MIN_CAMERA_DISTANCE);
-
-    // Estimate the shadow frustum width at its far plane and target one texel per screen pixel.
-    let map_span = 2.0 * light_range * light_half_fov.tan();
-    let required = camera.viewport_height as f32 * map_span
-        / (2.0
-            * MAX_SCREEN_PIXELS_PER_TEXEL
-            * camera_distance
-            * (camera.fovy * 0.5).tan());
-
-    ensure!(
-        camera_distance.is_finite() && map_span.is_finite() && required.is_finite(),
-        "shadow resolution calculation overflowed"
-    );
-
-    let required_tier = required
-        .ceil()
-        .clamp(
-            MIN_SHADOW_RESOLUTION as f32,
-            MAX_SHADOW_RESOLUTION as f32,
-        ) as u32;
-    let resolution = required_tier
-        .next_power_of_two()
-        .min(MAX_SHADOW_RESOLUTION);
-
-    Ok(ShadowResolutionDemand {
-        resolution,
-        tile_size: resolution + 2 * TILE_GUTTER,
-        required,
-    })
 }
 
 fn pack_views(
@@ -993,36 +876,46 @@ fn pack_views(
         "shadow atlas size exceeds the GPU's maximum 2D texture size of {max_size}"
     );
 
+    let Some(largest_tile) = views
+        .iter()
+        .filter(|view| view.needs_atlas_tile())
+        .map(|view| view.tile_size)
+        .max()
+    else {
+        return Ok((
+            EMPTY_ATLAS_SIZE,
+            EMPTY_ATLAS_SIZE,
+            vec![(0, 0); views.len()],
+        ));
+    };
+
+    ensure!(
+        largest_tile <= max_size,
+        "a shadow map exceeds the GPU's maximum 2D texture size of {max_size}"
+    );
+
     if let Some((required_height, placements)) = try_pack_views(views, current_width, max_size) {
         if required_height <= current_height {
-            return Ok((current_width, current_height, placements));
+            let required_width = packed_width(views, &placements)?;
+            return Ok((required_width, required_height, placements));
         }
     }
 
-    let largest_tile = views
-        .iter()
-        .map(|view| view.tile_size)
-        .max()
-        .unwrap_or(1);
     let mut candidate_width = current_width.max(largest_tile);
-    ensure!(
-        candidate_width <= max_size,
-        "a shadow map exceeds the GPU's maximum 2D texture size of {max_size}"
-    );
 
     let mut best: Option<(u64, u32, u32, Vec<(u32, u32)>)> = None;
     loop {
         if let Some((required_height, placements)) =
             try_pack_views(views, candidate_width, max_size)
         {
-            let height = current_height.max(required_height);
-            let area = u64::from(candidate_width) * u64::from(height);
+            let width = packed_width(views, &placements)?;
+            let area = u64::from(width) * u64::from(required_height);
             let replace = best
                 .as_ref()
                 .map_or(true, |(best_area, _, _, _)| area < *best_area);
 
             if replace {
-                best = Some((area, candidate_width, height, placements));
+                best = Some((area, width, required_height, placements));
             }
         }
 
@@ -1030,14 +923,31 @@ fn pack_views(
             break;
         }
 
-        candidate_width = candidate_width.saturating_add(MIN_SHADOW_RESOLUTION).min(max_size);
+        candidate_width = candidate_width
+            .saturating_add(ATLAS_WIDTH_STEP)
+            .min(max_size);
     }
 
-    let (_, width, height, placements) = best.context(
-        "shadow maps do not fit within the GPU's maximum 2D texture dimensions",
-    )?;
+    let (_, width, height, placements) =
+        best.context("shadow maps do not fit within the GPU's maximum 2D texture dimensions")?;
 
     Ok((width, height, placements))
+}
+
+fn packed_width(views: &[ShadowView], placements: &[(u32, u32)]) -> Result<u32> {
+    let width = views
+        .iter()
+        .zip(placements)
+        .filter(|(view, _)| view.needs_atlas_tile())
+        .try_fold(0, |width, (view, (x, _))| {
+            let right = x
+                .checked_add(view.tile_size)
+                .context("shadow atlas width overflow")?;
+
+            Ok::<_, anyhow::Error>(width.max(right))
+        })?;
+
+    Ok(width.max(EMPTY_ATLAS_SIZE))
 }
 
 fn try_pack_views(
@@ -1045,7 +955,11 @@ fn try_pack_views(
     atlas_width: u32,
     max_height: u32,
 ) -> Option<(u32, Vec<(u32, u32)>)> {
-    let mut order: Vec<usize> = (0..views.len()).collect();
+    let mut order = views
+        .iter()
+        .enumerate()
+        .filter_map(|(index, view)| view.needs_atlas_tile().then_some(index))
+        .collect::<Vec<_>>();
     order.sort_by_key(|&index| (Reverse(views[index].tile_size), index));
 
     let mut placements = vec![(0, 0); views.len()];
@@ -1080,7 +994,7 @@ fn try_pack_views(
 fn near_plane(range: f32) -> Result<f32> {
     ensure!(range.is_finite() && range > 0.0, "light range is invalid");
 
-    let near = (range * 0.01).max(MIN_NEAR_PLANE).min(range * 0.5);
+    let near = (range * 0.05).max(MIN_NEAR_PLANE).min(range * 0.5);
     ensure!(
         near > 0.0 && near < range,
         "light range is too small for shadows"

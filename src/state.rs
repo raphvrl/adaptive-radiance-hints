@@ -169,7 +169,6 @@ impl State {
         let size = self.window.inner_size();
         let aspect_ratio = size.width as f32 / size.height as f32;
         let view_proj = self.scene.camera_view_projection(aspect_ratio)?;
-        let shadow_camera = self.scene.shadow_camera(size.height)?;
         let material = self.selected_material_inspector();
         let light = self.selected_light_inspector();
         let mut ui_frame = self.ui.run(
@@ -236,7 +235,6 @@ impl State {
             &mut encoder,
             &view,
             view_proj,
-            shadow_camera,
             &renderables,
             &point_lights,
             &spot_lights,
@@ -338,7 +336,9 @@ impl State {
                 range: light.range,
                 inner_angle: light.inner_angle,
                 outer_angle: light.outer_angle,
-                shadow_resolution: self.renderer.shadow_resolution(entity, true),
+                shadow_resolution: light.shadow_resolution,
+                shadow_bias: light.shadow_bias,
+                shadow_normal_bias: light.shadow_normal_bias,
                 shadow_faces_enabled: None,
                 shadow_face_camera_visibility: None,
                 shadow_view_visibility: self.renderer.spot_shadow_visibility(entity),
@@ -354,7 +354,9 @@ impl State {
             range: light.range,
             inner_angle: 0.0,
             outer_angle: 0.0,
-            shadow_resolution: self.renderer.shadow_resolution(entity, false),
+            shadow_resolution: light.shadow_resolution,
+            shadow_bias: light.shadow_bias,
+            shadow_normal_bias: light.shadow_normal_bias,
             shadow_faces_enabled: Some(light.shadow_faces_enabled),
             shadow_face_camera_visibility: self.renderer.point_shadow_face_visibility(entity),
             shadow_view_visibility: None,
@@ -371,12 +373,18 @@ impl State {
                 color,
                 intensity,
                 range,
+                shadow_resolution,
+                shadow_bias,
+                shadow_normal_bias,
                 shadow_faces_enabled,
             } => {
                 if let Ok(mut light) = self.scene.world.get::<&mut PointLight>(entity) {
                     light.color = Vec3::from_array(color);
                     light.intensity = intensity;
                     light.range = range;
+                    light.shadow_resolution = shadow_resolution;
+                    light.shadow_bias = shadow_bias;
+                    light.shadow_normal_bias = shadow_normal_bias;
                     light.shadow_faces_enabled = shadow_faces_enabled;
                 }
             }
@@ -385,6 +393,9 @@ impl State {
                 color,
                 intensity,
                 range,
+                shadow_resolution,
+                shadow_bias,
+                shadow_normal_bias,
                 inner_angle,
                 outer_angle,
             } => {
@@ -392,6 +403,9 @@ impl State {
                     light.color = Vec3::from_array(color);
                     light.intensity = intensity;
                     light.range = range;
+                    light.shadow_resolution = shadow_resolution;
+                    light.shadow_bias = shadow_bias;
+                    light.shadow_normal_bias = shadow_normal_bias;
                     light.inner_angle = inner_angle;
                     light.outer_angle = outer_angle;
                 }

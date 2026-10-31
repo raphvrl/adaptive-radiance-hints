@@ -30,6 +30,9 @@ pub struct PointLightInstance {
     pub color: Vec3,
     pub intensity: f32,
     pub range: f32,
+    pub shadow_resolution: u32,
+    pub shadow_bias: f32,
+    pub shadow_normal_bias: f32,
     pub shadow_faces_enabled: [bool; POINT_SHADOW_FACE_COUNT],
 }
 
@@ -41,15 +44,11 @@ pub struct SpotLightInstance {
     pub color: Vec3,
     pub intensity: f32,
     pub range: f32,
+    pub shadow_resolution: u32,
+    pub shadow_bias: f32,
+    pub shadow_normal_bias: f32,
     pub inner_angle: f32,
     pub outer_angle: f32,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct ShadowCamera {
-    pub position: Vec3,
-    pub fovy: f32,
-    pub viewport_height: u32,
 }
 
 #[derive(Default)]
@@ -92,6 +91,9 @@ impl Scene {
                 color: light.color,
                 intensity: light.intensity,
                 range: light.range,
+                shadow_resolution: light.shadow_resolution,
+                shadow_bias: light.shadow_bias,
+                shadow_normal_bias: light.shadow_normal_bias,
                 shadow_faces_enabled: light.shadow_faces_enabled,
             })
             .collect()
@@ -109,6 +111,9 @@ impl Scene {
                 color: light.color,
                 intensity: light.intensity,
                 range: light.range,
+                shadow_resolution: light.shadow_resolution,
+                shadow_bias: light.shadow_bias,
+                shadow_normal_bias: light.shadow_normal_bias,
                 inner_angle: light.inner_angle,
                 outer_angle: light.outer_angle,
             })
@@ -188,25 +193,6 @@ impl Scene {
         let projection = camera.projection(aspect_ratio)?;
 
         Ok(projection * view)
-    }
-
-    pub fn shadow_camera(&self, viewport_height: u32) -> Result<ShadowCamera> {
-        ensure!(viewport_height > 0, "shadow viewport height must be positive");
-
-        let mut query = self.world.query::<(&Camera, &Transform)>();
-        let mut cameras = query.iter();
-
-        let (camera, transform) = cameras
-            .next()
-            .context("scene has no camera with a Transform")?;
-
-        ensure!(cameras.next().is_none(), "scene has more than one camera");
-
-        Ok(ShadowCamera {
-            position: transform.translation,
-            fovy: camera.fovy,
-            viewport_height,
-        })
     }
 }
 

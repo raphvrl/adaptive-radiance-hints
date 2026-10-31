@@ -1,8 +1,16 @@
 use serde::{Deserialize, Serialize};
 
-use crate::scene::{components::POINT_SHADOW_FACE_COUNT, materials::MaterialId};
+use crate::scene::{
+    components::{
+        DEFAULT_POINT_SHADOW_BIAS, DEFAULT_SHADOW_NORMAL_BIAS, DEFAULT_SHADOW_RESOLUTION,
+        DEFAULT_SPOT_SHADOW_BIAS, MAX_SHADOW_BIAS, MAX_SHADOW_NORMAL_BIAS,
+        POINT_SHADOW_FACE_COUNT, SHADOW_RESOLUTION_OPTIONS,
+    },
+    materials::MaterialId,
+};
 
-pub const SCENE_FORMAT_VERSION: u32 = 4;
+pub const SCENE_FORMAT_VERSION: u32 = 5;
+const MAX_LEGACY_SHADOW_DEPTH_BIAS: f32 = 0.002;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -76,8 +84,32 @@ pub struct PointLightData {
     pub color: [f32; 3],
     pub intensity: f32,
     pub range: f32,
+    #[serde(default = "default_shadow_resolution")]
+    pub shadow_resolution: u32,
+    #[serde(default = "default_point_shadow_bias")]
+    pub shadow_bias: f32,
+    #[serde(
+        default,
+        rename = "shadow_depth_bias",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub legacy_shadow_depth_bias: Option<f32>,
+    #[serde(default = "default_shadow_normal_bias")]
+    pub shadow_normal_bias: f32,
     #[serde(default = "all_point_shadow_faces_enabled")]
     pub shadow_faces_enabled: [bool; POINT_SHADOW_FACE_COUNT],
+}
+
+fn default_shadow_resolution() -> u32 {
+    DEFAULT_SHADOW_RESOLUTION
+}
+
+fn default_shadow_normal_bias() -> f32 {
+    DEFAULT_SHADOW_NORMAL_BIAS
+}
+
+fn default_point_shadow_bias() -> f32 {
+    DEFAULT_POINT_SHADOW_BIAS
 }
 
 fn all_point_shadow_faces_enabled() -> [bool; POINT_SHADOW_FACE_COUNT] {
@@ -90,8 +122,43 @@ pub struct SpotLightData {
     pub color: [f32; 3],
     pub intensity: f32,
     pub range: f32,
+    #[serde(default = "default_shadow_resolution")]
+    pub shadow_resolution: u32,
+    #[serde(default = "default_spot_shadow_bias")]
+    pub shadow_bias: f32,
+    #[serde(
+        default,
+        rename = "shadow_depth_bias",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub legacy_shadow_depth_bias: Option<f32>,
+    #[serde(default = "default_shadow_normal_bias")]
+    pub shadow_normal_bias: f32,
     pub inner_angle: f32,
     pub outer_angle: f32,
+}
+
+impl PointLightData {
+    pub fn resolved_shadow_bias(&self) -> f32 {
+        resolve_shadow_bias(self.shadow_bias, self.legacy_shadow_depth_bias)
+    }
+}
+
+impl SpotLightData {
+    pub fn resolved_shadow_bias(&self) -> f32 {
+        resolve_shadow_bias(self.shadow_bias, self.legacy_shadow_depth_bias)
+    }
+}
+
+fn resolve_shadow_bias(shadow_bias: f32, legacy_depth_bias: Option<f32>) -> f32 {
+    // Version 4 stored the final normalized depth offset, while version 5 stores Godot's bias parameter.
+    legacy_depth_bias
+        .map(|bias| bias * 100.0)
+        .unwrap_or(shadow_bias)
+}
+
+fn default_spot_shadow_bias() -> f32 {
+    DEFAULT_SPOT_SHADOW_BIAS
 }
 
 impl SceneFile {
@@ -216,6 +283,28 @@ impl SceneFile {
 
             if let Some(light) = &entity.point_light {
                 ensure!(
+                    SHADOW_RESOLUTION_OPTIONS.contains(&light.shadow_resolution),
+                    "point light on '{name}' has an unsupported shadow resolution {}",
+                    light.shadow_resolution
+                );
+                if let Some(legacy_bias) = light.legacy_shadow_depth_bias {
+                    ensure!(
+                        legacy_bias.is_finite()
+                            && (0.0..=MAX_LEGACY_SHADOW_DEPTH_BIAS).contains(&legacy_bias),
+                        "point light on '{name}' has an invalid legacy shadow depth bias"
+                    );
+                }
+                let shadow_bias = light.resolved_shadow_bias();
+                ensure!(
+                    shadow_bias.is_finite() && (0.0..=MAX_SHADOW_BIAS).contains(&shadow_bias),
+                    "point light on '{name}' has an invalid shadow bias"
+                );
+                ensure!(
+                    light.shadow_normal_bias.is_finite()
+                        && (0.0..=MAX_SHADOW_NORMAL_BIAS).contains(&light.shadow_normal_bias),
+                    "point light on '{name}' has an invalid shadow normal bias"
+                );
+                ensure!(
                     light
                         .color
                         .into_iter()
@@ -233,6 +322,28 @@ impl SceneFile {
             }
 
             if let Some(light) = &entity.spot_light {
+                ensure!(
+                    SHADOW_RESOLUTION_OPTIONS.contains(&light.shadow_resolution),
+                    "spot light on '{name}' has an unsupported shadow resolution {}",
+                    light.shadow_resolution
+                );
+                if let Some(legacy_bias) = light.legacy_shadow_depth_bias {
+                    ensure!(
+                        legacy_bias.is_finite()
+                            && (0.0..=MAX_LEGACY_SHADOW_DEPTH_BIAS).contains(&legacy_bias),
+                        "spot light on '{name}' has an invalid legacy shadow depth bias"
+                    );
+                }
+                let shadow_bias = light.resolved_shadow_bias();
+                ensure!(
+                    shadow_bias.is_finite() && (0.0..=MAX_SHADOW_BIAS).contains(&shadow_bias),
+                    "spot light on '{name}' has an invalid shadow bias"
+                );
+                ensure!(
+                    light.shadow_normal_bias.is_finite()
+                        && (0.0..=MAX_SHADOW_NORMAL_BIAS).contains(&light.shadow_normal_bias),
+                    "spot light on '{name}' has an invalid shadow normal bias"
+                );
                 ensure!(
                     light
                         .color

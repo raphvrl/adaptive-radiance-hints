@@ -16,7 +16,7 @@ use glam::{Mat4, Vec3, Vec4};
 use crate::{
     editor::{GizmoDraw, LightMarkerDraw},
     handle::MeshHandle,
-    scene::{MeshInstance, PointLightInstance, ShadowCamera, SpotLightInstance},
+    scene::{MeshInstance, PointLightInstance, SpotLightInstance},
 };
 
 use assets::MeshAssets;
@@ -116,10 +116,6 @@ impl Renderer {
         self.tonemap.set_hdr_view(device, self.hdr.view());
     }
 
-    pub fn shadow_resolution(&self, entity: hecs::Entity, is_spot: bool) -> Option<u32> {
-        self.shadow_atlas.resolution(entity, is_spot)
-    }
-
     pub fn point_shadow_face_visibility(&self, entity: hecs::Entity) -> Option<[bool; 6]> {
         self.last_shadow_plan
             .as_ref()?
@@ -139,7 +135,6 @@ impl Renderer {
         encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
         view_proj: Mat4,
-        shadow_camera: ShadowCamera,
         renderables: &[MeshInstance],
         point_lights: &[PointLightInstance],
         spot_lights: &[SpotLightInstance],
@@ -164,8 +159,7 @@ impl Renderer {
             .iter()
             .find_map(|instance| instance.selected.then_some(instance.model));
 
-        let mut shadow_plan =
-            shadows::build_plan(point_lights, spot_lights, shadow_camera, view_proj)?;
+        let mut shadow_plan = shadows::build_plan(point_lights, spot_lights, view_proj)?;
         self.shadow_atlas
             .ensure_capacity(device, &mut shadow_plan.views)?;
         self.shadow_atlas
@@ -182,7 +176,6 @@ impl Renderer {
             &batches,
             &mut shadow_plan.views,
         )?;
-
         self.geometry.encode(
             encoder,
             self.hdr.view(),

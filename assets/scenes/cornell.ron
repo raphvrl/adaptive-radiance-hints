@@ -42,8 +42,8 @@
         (
             name: "Camera",
             transform: (
-                translation: (0.03441885, 2.1940506, 5.051166),
-                rotation_xyzw: (0.105791844, 0.009778615, 0.0010403866, -0.9943397),
+                translation: (-0.08587811, 2.197472, 4.246139),
+                rotation_xyzw: (0.15921798, 0.033759788, 0.005447889, -0.98665094),
                 scale: (1.0, 1.0, 1.0),
             ),
             mesh: None,
@@ -56,8 +56,8 @@
             controller: Some((
                 move_speed: 3.0,
                 look_sensitivity: 0.002,
-                yaw: 6.2635174,
-                pitch: -0.21199064,
+                yaw: 6.214779,
+                pitch: -0.31998572,
             )),
             point_light: None,
             spot_light: None,
@@ -113,7 +113,7 @@
         (
             name: "LightPanel",
             transform: (
-                translation: (0.0, 2.465, -0.15),
+                translation: (0.0, 2.465, 0.35),
                 rotation_xyzw: (0.0, 0.0, 0.0, 1.0),
                 scale: (0.72, 0.03, 0.58),
             ),
@@ -129,7 +129,7 @@
         (
             name: "PointLight1",
             transform: (
-                translation: (0.008122906, 2.4295592, -0.14738584),
+                translation: (0.008122906, 2.4295592, 0.35),
                 rotation_xyzw: (0.03398203, 0.022194423, 0.00075483375, -0.9991757),
                 scale: (1.0, 1.0, 1.0),
             ),
@@ -139,8 +139,9 @@
             controller: None,
             point_light: Some((
                 color: (1.0, 1.0, 1.0),
-                intensity: 3.0,
-                range: 8.0,
+                intensity: 40.0,
+                range: 3.0,
+                shadow_resolution: 2048,
                 shadow_faces_enabled: (false, false, false, true, false, false),
             )),
             spot_light: None,
@@ -164,7 +165,7 @@
         (
             name: "ShortBlock",
             transform: (
-                translation: (0.4, 0.35, 0.35),
+                translation: (0.45082703, 0.35, 0.35),
                 rotation_xyzw: (0.0, -0.1305262, 0.0, 0.9914449),
                 scale: (0.7, 0.7, 0.7),
             ),
@@ -180,7 +181,7 @@
         (
             name: "TallBlock",
             transform: (
-                translation: (-0.38, 0.625, -0.2),
+                translation: (-0.38, 0.625, -0.43363428),
                 rotation_xyzw: (0.0, 0.10452846, 0.0, 0.9945219),
                 scale: (0.72, 1.25, 0.72),
             ),
