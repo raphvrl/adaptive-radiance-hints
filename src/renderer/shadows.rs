@@ -13,8 +13,9 @@ use wgpu::util::DeviceExt;
 use crate::{
     renderer::{
         assets::MeshAssets,
+        frustum::Frustum,
         instances::{InstanceBuffer, InstanceRaw, MeshBatch},
-        mesh::MeshVertex,
+        mesh::{Aabb, MeshVertex},
     },
     scene::{
         PointLightInstance, SpotLightInstance,
@@ -27,7 +28,6 @@ const ATLAS_WIDTH_STEP: u32 = 128;
 const TILE_GUTTER: u32 = 2;
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth16Unorm;
 const MIN_NEAR_PLANE: f32 = 0.001;
-const FRUSTUM_INTERSECTION_EPSILON: f32 = 0.001;
 const SHADOW_VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 1] =
     wgpu::vertex_attr_array![0 => Float32x3];
 const SHADOW_INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 4] = wgpu::vertex_attr_array![
@@ -48,103 +48,11 @@ const SHADOW_INSTANCE_LAYOUT: wgpu::VertexBufferLayout<'static> = wgpu::VertexBu
 };
 
 #[derive(Clone, Copy)]
-struct ClipFrustum {
-    planes: [Vec4; 6],
-    corners: [Vec3; 8],
-}
-
-impl ClipFrustum {
-    fn from_view_proj(view_proj: Mat4) -> Result<Self> {
-        ensure!(
-            view_proj.is_finite(),
-            "frustum view-projection matrix is invalid"
-        );
-
-        let inverse = view_proj.inverse();
-        ensure!(
-            inverse.is_finite(),
-            "frustum view-projection matrix is singular"
-        );
-
-        let corners = [
-            Self::unproject_corner(inverse, Vec4::new(-1.0, -1.0, 0.0, 1.0))?,
-            Self::unproject_corner(inverse, Vec4::new(1.0, -1.0, 0.0, 1.0))?,
-            Self::unproject_corner(inverse, Vec4::new(-1.0, 1.0, 0.0, 1.0))?,
-            Self::unproject_corner(inverse, Vec4::new(1.0, 1.0, 0.0, 1.0))?,
-            Self::unproject_corner(inverse, Vec4::new(-1.0, -1.0, 1.0, 1.0))?,
-            Self::unproject_corner(inverse, Vec4::new(1.0, -1.0, 1.0, 1.0))?,
-            Self::unproject_corner(inverse, Vec4::new(-1.0, 1.0, 1.0, 1.0))?,
-            Self::unproject_corner(inverse, Vec4::new(1.0, 1.0, 1.0, 1.0))?,
-        ];
-
-        let columns = view_proj.to_cols_array_2d();
-        let row = |index| {
-            Vec4::new(
-                columns[0][index],
-                columns[1][index],
-                columns[2][index],
-                columns[3][index],
-            )
-        };
-        let row_0 = row(0);
-        let row_1 = row(1);
-        let row_2 = row(2);
-        let row_3 = row(3);
-        let planes = [
-            Self::normalize_plane(row_3 + row_0)?,
-            Self::normalize_plane(row_3 - row_0)?,
-            Self::normalize_plane(row_3 + row_1)?,
-            Self::normalize_plane(row_3 - row_1)?,
-            Self::normalize_plane(row_2)?,
-            Self::normalize_plane(row_3 - row_2)?,
-        ];
-
-        Ok(Self { planes, corners })
-    }
-
-    fn intersects(self, other: Self) -> bool {
-        !self.separates(other) && !other.separates(self)
-    }
-
-    fn separates(self, other: Self) -> bool {
-        // Face-plane checks are conservative: they may keep an unnecessary view, but never cull a needed one.
-        self.planes.iter().any(|plane| {
-            other
-                .corners
-                .iter()
-                .all(|corner| plane.dot(corner.extend(1.0)) < -FRUSTUM_INTERSECTION_EPSILON)
-        })
-    }
-
-    fn unproject_corner(inverse: Mat4, clip_corner: Vec4) -> Result<Vec3> {
-        let world_corner = inverse * clip_corner;
-        ensure!(
-            world_corner.is_finite() && world_corner.w.abs() > f32::EPSILON,
-            "frustum corner is invalid"
-        );
-
-        let world_corner = world_corner.truncate() / world_corner.w;
-        ensure!(world_corner.is_finite(), "frustum corner is invalid");
-
-        Ok(world_corner)
-    }
-
-    fn normalize_plane(plane: Vec4) -> Result<Vec4> {
-        let normal_length = plane.truncate().length();
-        ensure!(
-            normal_length.is_finite() && normal_length > f32::EPSILON,
-            "frustum plane is invalid"
-        );
-
-        Ok(plane / normal_length)
-    }
-}
-
-#[derive(Clone, Copy)]
 pub struct ShadowView {
     pub tile_index: u32,
     pub view_proj: Mat4,
     camera_visible: bool,
+    scene_visible: bool,
     enabled: bool,
     resolution: u32,
     tile_size: u32,
@@ -155,7 +63,7 @@ pub struct ShadowView {
 
 impl ShadowView {
     fn needs_atlas_tile(&self) -> bool {
-        self.enabled && self.camera_visible
+        self.enabled && self.camera_visible && self.scene_visible
     }
 }
 
@@ -295,6 +203,15 @@ impl ShadowAtlas {
         device: &wgpu::Device,
         views: &mut [ShadowView],
     ) -> Result<()> {
+        if let Some((_, placements)) = try_pack_views(views, self.width, self.height) {
+            for (view, (x, y)) in views.iter_mut().zip(placements) {
+                view.x = x;
+                view.y = y;
+            }
+
+            return Ok(());
+        }
+
         let (required_width, required_height, placements) = pack_views(
             views,
             self.width,
@@ -307,11 +224,10 @@ impl ShadowAtlas {
             view.y = y;
         }
 
-        if required_width == self.width && required_height == self.height {
-            return Ok(());
-        }
+        let width = self.width.max(required_width);
+        let height = self.height.max(required_height);
 
-        let (texture, view) = Self::create_texture(device, required_width, required_height);
+        let (texture, view) = Self::create_texture(device, width, height);
         let bind_group = Self::create_bind_group(
             device,
             &self.layout,
@@ -323,8 +239,8 @@ impl ShadowAtlas {
         self.texture = texture;
         self.view = view;
         self.bind_group = bind_group;
-        self.width = required_width;
-        self.height = required_height;
+        self.width = width;
+        self.height = height;
 
         Ok(())
     }
@@ -584,7 +500,7 @@ impl ShadowPass {
         pass.set_vertex_buffer(1, instances.buffer().slice(..));
 
         for view in views {
-            if !view.enabled || !view.camera_visible {
+            if !view.needs_atlas_tile() {
                 continue;
             }
 
@@ -734,8 +650,9 @@ pub fn build_plan(
     point_lights: &[PointLightInstance],
     spot_lights: &[SpotLightInstance],
     camera_view_proj: Mat4,
+    world_bounds: &[Aabb],
 ) -> Result<ShadowPlan> {
-    let camera_frustum = ClipFrustum::from_view_proj(camera_view_proj)?;
+    let camera_frustum = Frustum::from_view_proj(camera_view_proj)?;
     let capacity = point_lights
         .len()
         .checked_mul(POINT_SHADOW_FACE_COUNT)
@@ -777,6 +694,7 @@ pub fn build_plan(
                 view_proj,
                 light.shadow_resolution,
                 &camera_frustum,
+                world_bounds,
                 light.shadow_faces_enabled[face_index],
                 &mut tile_index,
             )?;
@@ -820,6 +738,7 @@ pub fn build_plan(
             view_proj,
             light.shadow_resolution,
             &camera_frustum,
+            world_bounds,
             true,
             &mut tile_index,
         )?;
@@ -836,17 +755,24 @@ fn push_view(
     views: &mut Vec<ShadowView>,
     view_proj: Mat4,
     resolution: u32,
-    camera_frustum: &ClipFrustum,
+    camera_frustum: &Frustum,
+    world_bounds: &[Aabb],
     enabled: bool,
     tile_index: &mut u32,
 ) -> Result<()> {
-    let camera_visible =
-        enabled && camera_frustum.intersects(ClipFrustum::from_view_proj(view_proj)?);
+    let view_frustum = Frustum::from_view_proj(view_proj)?;
+    let camera_visible = enabled && camera_frustum.intersects(view_frustum);
+    let scene_visible = camera_visible
+        && world_bounds
+            .iter()
+            .copied()
+            .any(|bounds| view_frustum.intersects_aabb(bounds));
 
     views.push(ShadowView {
         tile_index: *tile_index,
         view_proj,
         camera_visible,
+        scene_visible,
         enabled,
         resolution,
         tile_size: resolution + 2 * TILE_GUTTER,

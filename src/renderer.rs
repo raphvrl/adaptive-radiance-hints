@@ -1,22 +1,26 @@
 mod assets;
 mod bindings;
 mod depth;
+mod frustum;
 mod hdr;
 mod instances;
 mod lights;
 mod passes;
+mod rsm;
 mod shadows;
 
 pub mod mesh;
 pub mod meshes;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use glam::{Mat4, Vec3, Vec4};
 
 use crate::{
     editor::{GizmoDraw, LightMarkerDraw},
     handle::MeshHandle,
-    scene::{MeshInstance, PointLightInstance, SpotLightInstance},
+    scene::{
+        MeshInstance, PointLightInstance, SpotLightInstance, components::POINT_SHADOW_FACE_COUNT,
+    },
 };
 
 use assets::MeshAssets;
@@ -26,7 +30,8 @@ use hdr::HdrTarget;
 use instances::InstanceBuffer;
 use lights::LightBuffer;
 use mesh::MeshData;
-use passes::{GeometryPass, GizmoPass, SelectionPass, TonemapPass};
+use passes::{GeometryPass, GizmoPass, RsmPass, SelectionPass, TonemapPass};
+use rsm::{RsmAtlas, RsmView, cull_empty_views};
 use shadows::{ShadowAtlas, ShadowPass, ShadowPlan};
 
 #[derive(Clone, Copy, Debug)]
@@ -55,6 +60,8 @@ pub struct Renderer {
     depth: DepthTarget,
     shadow_atlas: ShadowAtlas,
     shadow_pass: ShadowPass,
+    rsm_atlas: RsmAtlas,
+    rsm_pass: RsmPass,
     last_shadow_plan: Option<ShadowPlan>,
     assets: MeshAssets,
     instances: InstanceBuffer,
@@ -69,6 +76,8 @@ impl Renderer {
     ) -> Result<Self> {
         let frame = FrameBindings::new(device)?;
         let lights = LightBuffer::new(device)?;
+        let rsm_atlas = RsmAtlas::new(device);
+        let rsm_pass = RsmPass::new(device, lights.layout())?;
         let hdr = HdrTarget::new(device, width, height);
         let shadow_atlas = ShadowAtlas::new(device)?;
         let geometry = GeometryPass::new(
@@ -96,6 +105,8 @@ impl Renderer {
             depth,
             shadow_atlas,
             shadow_pass,
+            rsm_atlas,
+            rsm_pass,
             last_shadow_plan: None,
             assets: MeshAssets::default(),
             instances,
@@ -160,8 +171,18 @@ impl Renderer {
         let selected_model = renderables
             .iter()
             .find_map(|instance| instance.selected.then_some(instance.model));
+        let world_bounds = renderables
+            .iter()
+            .map(|instance| {
+                self.assets
+                    .get(instance.mesh)?
+                    .bounds()
+                    .transformed(instance.model)
+            })
+            .collect::<Result<Vec<_>>>()?;
 
-        let mut shadow_plan = shadows::build_plan(point_lights, spot_lights, view_proj)?;
+        let mut shadow_plan =
+            shadows::build_plan(point_lights, spot_lights, view_proj, &world_bounds)?;
         self.shadow_atlas
             .ensure_capacity(device, &mut shadow_plan.views)?;
         self.shadow_atlas
@@ -178,6 +199,83 @@ impl Renderer {
             &batches,
             &mut shadow_plan.views,
         )?;
+
+        let rsm_view_count = point_lights
+            .len()
+            .checked_mul(POINT_SHADOW_FACE_COUNT)
+            .and_then(|count| count.checked_add(spot_lights.len()))
+            .context("RSM view count overflow")?;
+        let mut rsm_views = Vec::with_capacity(rsm_view_count);
+
+        for (light_index, light) in point_lights.iter().enumerate() {
+            let first_view = shadow_plan
+                .point_tile(light.entity)
+                .context("point light has no RSM views")?;
+            let first_view = usize::try_from(first_view).context("RSM view index overflow")?;
+            let light_index = u32::try_from(light_index)?;
+            let resolution = (light.shadow_resolution / 8).max(64);
+
+            for face_index in 0..POINT_SHADOW_FACE_COUNT {
+                let view_index = first_view
+                    .checked_add(face_index)
+                    .context("point light RSM view index overflow")?;
+                let shadow_view = shadow_plan
+                    .views
+                    .get(view_index)
+                    .context("point light RSM face is missing")?;
+
+                rsm_views.push(RsmView {
+                    view_proj: shadow_view.view_proj,
+                    light_index,
+                    resolution,
+                    x: 0,
+                    y: 0,
+                    active: false,
+                });
+            }
+        }
+
+        let first_spot_index = u32::try_from(point_lights.len())?;
+        for (spot_index, light) in spot_lights.iter().enumerate() {
+            let view_index = shadow_plan
+                .spot_tile(light.entity)
+                .context("spot light has no RSM view")?;
+            let view_index = usize::try_from(view_index).context("RSM view index overflow")?;
+            let shadow_view = shadow_plan
+                .views
+                .get(view_index)
+                .context("spot light RSM view is missing")?;
+            let light_index = first_spot_index
+                .checked_add(u32::try_from(spot_index)?)
+                .context("RSM light index overflow")?;
+
+            rsm_views.push(RsmView {
+                view_proj: shadow_view.view_proj,
+                light_index,
+                resolution: (light.shadow_resolution / 8).max(64),
+                x: 0,
+                y: 0,
+                active: false,
+            });
+        }
+
+        cull_empty_views(&mut rsm_views, &world_bounds)?;
+        self.rsm_atlas.ensure_capacity(device, &mut rsm_views)?;
+
+        if !rsm_views.is_empty() {
+            self.rsm_pass.encode(
+                device,
+                queue,
+                encoder,
+                &self.rsm_atlas,
+                self.lights.bind_group(),
+                &rsm_views,
+                &self.assets,
+                &self.instances,
+                &batches,
+            )?;
+        }
+
         self.geometry.encode(
             encoder,
             self.hdr.view(),

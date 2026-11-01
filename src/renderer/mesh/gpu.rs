@@ -1,12 +1,13 @@
 use anyhow::{Context, Result, ensure};
 use wgpu::util::DeviceExt;
 
-use super::MeshData;
+use super::{Aabb, MeshData};
 
 pub struct GpuMesh {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     index_count: u32,
+    bounds: Aabb,
 }
 
 impl GpuMesh {
@@ -18,6 +19,7 @@ impl GpuMesh {
 
         let index_count =
             u32::try_from(data.indices.len()).context("mesh has more than u32::MAX indices")?;
+        let bounds = Aabb::from_vertices(&data.vertices)?;
 
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Mesh vertex buffer"),
@@ -35,6 +37,7 @@ impl GpuMesh {
             vertex_buffer,
             index_buffer,
             index_count,
+            bounds,
         })
     }
 
@@ -48,5 +51,9 @@ impl GpuMesh {
 
     pub fn index_count(&self) -> u32 {
         self.index_count
+    }
+
+    pub fn bounds(&self) -> Aabb {
+        self.bounds
     }
 }

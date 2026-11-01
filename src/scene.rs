@@ -75,14 +75,10 @@ impl Scene {
                     mesh: mesh.handle,
                     model: model_matrix(transform),
                     base_color: material.map_or(Vec3::ONE, |material| material.base_color),
-                    metallic: material.map_or(
-                        DEFAULT_MATERIAL_METALLIC,
-                        |material| material.metallic,
-                    ),
-                    roughness: material.map_or(
-                        DEFAULT_MATERIAL_ROUGHNESS,
-                        |material| material.roughness,
-                    ),
+                    metallic: material
+                        .map_or(DEFAULT_MATERIAL_METALLIC, |material| material.metallic),
+                    roughness: material
+                        .map_or(DEFAULT_MATERIAL_ROUGHNESS, |material| material.roughness),
                     emission: material.map_or(Vec3::ZERO, |material| material.emission),
                     selected: selected == Some(entity),
                 }

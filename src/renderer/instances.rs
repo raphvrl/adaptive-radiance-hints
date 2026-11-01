@@ -120,11 +120,7 @@ impl InstanceBuffer {
 
             for (model, base_color, metallic, roughness, emission) in models {
                 instances.push(InstanceRaw::from_model(
-                    model,
-                    base_color,
-                    metallic,
-                    roughness,
-                    emission,
+                    model, base_color, metallic, roughness, emission,
                 )?);
             }
 

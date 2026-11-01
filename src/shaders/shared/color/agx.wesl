@@ -43,7 +43,7 @@ fn agx_outset(color: vec3f) -> vec3f {
     );
 }
 
-public fn agx_tonemap(color: vec3f, exposure: f32) -> vec3f {
+fn agx_tonemap(color: vec3f, exposure: f32) -> vec3f {
     var mapped = linear_srgb_to_rec2020(max(color, vec3f(0.0)) * exposure);
     mapped = agx_log_encode(mapped);
     mapped = agx_default_contrast(mapped);
