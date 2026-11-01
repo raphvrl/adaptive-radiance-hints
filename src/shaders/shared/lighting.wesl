@@ -158,9 +158,8 @@ fn shadow_visibility(
             abs(direction_to_light.x),
             max(abs(direction_to_light.y), abs(direction_to_light.z)),
         );
-        let depth_slope = light.range * near_plane
-            / (max(light.range - near_plane, 0.0001) * view_depth * view_depth);
-        // Point lights use a world-space bias; convert it through this perspective map's depth curve.
+
+        let depth_slope = light.range * near_plane / (max(light.range - near_plane, 0.0001) * view_depth * view_depth);
         depth_bias = light.shadow_bias * face_alignment * depth_slope;
     }
     let texel_size = 1.0 / vec2f(textureDimensions(shadow_atlas));
@@ -317,6 +316,7 @@ fn shade_surface(
         ambient_color,
         ambient_intensity,
     );
+
     let direct = direct_lighting(
         world_position,
         normal,
