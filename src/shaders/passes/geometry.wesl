@@ -3,6 +3,7 @@ import package::shared::lighting::shade_surface;
 struct FrameUniform {
     view_proj: mat4x4<f32>,
     ambient_light: vec4f,
+    camera_position: vec4f,
 }
 
 @group(0) @binding(0)
@@ -23,16 +24,19 @@ struct Instance {
     @location(7) normal_1: vec4f,
     @location(8) normal_2: vec4f,
 
-    @location(9) albedo: vec4f,
+    @location(9) base_color: vec4f,
     @location(10) emission: vec4f,
+    @location(11) metallic_roughness: vec2f,
 }
 
 struct VertexOutput {
     @builtin(position) position: vec4f,
     @location(0) normal: vec3f,
-    @location(1) albedo: vec3f,
-    @location(2) emission: vec3f,
-    @location(3) world_position: vec3f,
+    @location(1) base_color: vec3f,
+    @location(2) metallic: f32,
+    @location(3) roughness: f32,
+    @location(4) emission: vec3f,
+    @location(5) world_position: vec3f,
 }
 
 @vertex
@@ -55,7 +59,9 @@ fn vs_main(vertex: VertexInput, instance: Instance) -> VertexOutput {
     let world_position = model * vec4f(vertex.position, 1.0);
     output.position = frame.view_proj * world_position;
     output.normal = normal_matrix * vertex.normal;
-    output.albedo = instance.albedo.rgb;
+    output.base_color = instance.base_color.rgb;
+    output.metallic = instance.metallic_roughness.x;
+    output.roughness = instance.metallic_roughness.y;
     output.emission = instance.emission.rgb;
     output.world_position = world_position.xyz;
 
@@ -68,7 +74,10 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4f {
     let color = shade_surface(
         input.world_position,
         normal,
-        input.albedo,
+        frame.camera_position.xyz,
+        input.base_color,
+        input.metallic,
+        input.roughness,
         input.emission,
         frame.ambient_light.rgb,
         frame.ambient_light.a,

@@ -9,6 +9,7 @@ use wgpu::util::DeviceExt;
 pub struct FrameUniform {
     pub view_proj: Mat4,
     pub ambient_light: Vec4,
+    pub camera_position: Vec4,
 }
 
 impl Default for FrameUniform {
@@ -16,6 +17,7 @@ impl Default for FrameUniform {
         Self {
             view_proj: Mat4::IDENTITY,
             ambient_light: Vec4::new(1.0, 1.0, 1.0, 0.1),
+            camera_position: Vec4::ZERO,
         }
     }
 }

@@ -32,7 +32,9 @@ pub fn load_scene(path: &Path, mesh_assets: &HashMap<String, MeshHandle>) -> Res
         scene.materials.insert(
             material.id,
             Material {
-                albedo: Vec3::from_array(material.albedo),
+                base_color: Vec3::from_array(material.base_color),
+                metallic: material.metallic,
+                roughness: material.roughness,
                 emission: Vec3::from_array(material.emission),
             },
         );
@@ -192,10 +194,13 @@ pub fn save_scene(path: &Path, scene: &Scene) -> Result<()> {
         .iter()
         .map(|(id, material)| MaterialData {
             id: id.clone(),
-            albedo: material.albedo.to_array(),
+            base_color: material.base_color.to_array(),
+            metallic: material.metallic,
+            roughness: material.roughness,
             emission: material.emission.to_array(),
         })
         .collect::<Vec<_>>();
+
     materials.sort_by(|left, right| left.id.as_str().cmp(right.id.as_str()));
 
     let scene_file = SceneFile {
@@ -203,9 +208,11 @@ pub fn save_scene(path: &Path, scene: &Scene) -> Result<()> {
         materials,
         entities,
     };
+
     scene_file.validate()?;
 
     let content = ron::ser::to_string_pretty(&scene_file, ron::ser::PrettyConfig::default())
         .context("failed to serialize scene")?;
+
     fs::write(path, content).with_context(|| format!("failed to write scene '{}'", path.display()))
 }

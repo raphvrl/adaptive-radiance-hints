@@ -13,12 +13,14 @@ use glam::{Mat4, Vec3};
 use hecs::Entity;
 
 use crate::{handle::MeshHandle, input::Input};
-use materials::MaterialLibrary;
+use materials::{DEFAULT_MATERIAL_METALLIC, DEFAULT_MATERIAL_ROUGHNESS, MaterialLibrary};
 
 pub struct MeshInstance {
     pub mesh: MeshHandle,
     pub model: Mat4,
-    pub albedo: Vec3,
+    pub base_color: Vec3,
+    pub metallic: f32,
+    pub roughness: f32,
     pub emission: Vec3,
     pub selected: bool,
 }
@@ -72,7 +74,15 @@ impl Scene {
                 MeshInstance {
                     mesh: mesh.handle,
                     model: model_matrix(transform),
-                    albedo: material.map_or(Vec3::ONE, |material| material.albedo),
+                    base_color: material.map_or(Vec3::ONE, |material| material.base_color),
+                    metallic: material.map_or(
+                        DEFAULT_MATERIAL_METALLIC,
+                        |material| material.metallic,
+                    ),
+                    roughness: material.map_or(
+                        DEFAULT_MATERIAL_ROUGHNESS,
+                        |material| material.roughness,
+                    ),
                     emission: material.map_or(Vec3::ZERO, |material| material.emission),
                     selected: selected == Some(entity),
                 }
@@ -177,6 +187,11 @@ impl Scene {
     }
 
     pub fn camera_view_projection(&self, aspect_ratio: f32) -> Result<Mat4> {
+        self.camera_view_projection_and_position(aspect_ratio)
+            .map(|(view_proj, _)| view_proj)
+    }
+
+    pub fn camera_view_projection_and_position(&self, aspect_ratio: f32) -> Result<(Mat4, Vec3)> {
         let mut query = self.world.query::<(&Camera, &Transform)>();
         let mut cameras = query.iter();
 
@@ -191,8 +206,9 @@ impl Scene {
 
         let view = camera_world.inverse();
         let projection = camera.projection(aspect_ratio)?;
+        let camera_position = transform.translation;
 
-        Ok(projection * view)
+        Ok((projection * view, camera_position))
     }
 }
 

@@ -11,14 +11,18 @@ use crate::scene::{
 pub struct MaterialInspectorData {
     pub entity_name: String,
     pub material_id: MaterialId,
-    pub albedo: [f32; 3],
+    pub base_color: [f32; 3],
+    pub metallic: f32,
+    pub roughness: f32,
     pub emission: [f32; 3],
     pub users: usize,
 }
 
 pub struct MaterialEdit {
     pub material_id: MaterialId,
-    pub albedo: [f32; 3],
+    pub base_color: [f32; 3],
+    pub metallic: f32,
+    pub roughness: f32,
     pub emission: [f32; 3],
 }
 
@@ -65,7 +69,19 @@ pub fn show(
     material: Option<&MaterialInspectorData>,
 ) -> Option<MaterialEdit> {
     let material = material?;
-    let mut edit = None;
+    let mut changed = false;
+    let mut base_color = material.base_color;
+    let mut metallic = material.metallic;
+    let mut roughness = material.roughness;
+    let mut emission = material.emission;
+    let mut emission_intensity = material.emission.into_iter().fold(0.0_f32, f32::max);
+    let mut emission_color = if emission_intensity > f32::EPSILON {
+        material
+            .emission
+            .map(|channel| channel / emission_intensity)
+    } else {
+        [1.0; 3]
+    };
 
     egui::Window::new("Material")
         .default_pos(root_ui.max_rect().right_top() + egui::vec2(-300.0, 12.0))
@@ -83,37 +99,24 @@ pub fn show(
                 ));
             }
 
-            let mut albedo = material.albedo;
-            let mut emission_intensity = material.emission.into_iter().fold(0.0_f32, f32::max);
-            let mut emission_color = if emission_intensity > f32::EPSILON {
-                material
-                    .emission
-                    .map(|channel| channel / emission_intensity)
-            } else {
-                [1.0; 3]
-            };
-
             ui.separator();
             ui.horizontal(|ui| {
-                ui.label("Albedo");
-                if ui.color_edit_button_rgb(&mut albedo).changed() {
-                    edit = Some(MaterialEdit {
-                        material_id: material.material_id.clone(),
-                        albedo,
-                        emission: material.emission,
-                    });
-                }
+                ui.label("Base color");
+                changed |= ui.color_edit_button_rgb(&mut base_color).changed();
             });
+
+            changed |= ui
+                .add(egui::Slider::new(&mut metallic, 0.0..=1.0).text("Metallic"))
+                .changed();
+            changed |= ui
+                .add(egui::Slider::new(&mut roughness, 0.0..=1.0).text("Roughness"))
+                .changed();
 
             ui.horizontal(|ui| {
                 ui.label("Emission");
                 if ui.color_edit_button_rgb(&mut emission_color).changed() {
-                    edit = Some(MaterialEdit {
-                        material_id: material.material_id.clone(),
-                        albedo,
-                        emission: (Vec3::from_array(emission_color) * emission_intensity)
-                            .to_array(),
-                    });
+                    emission = (Vec3::from_array(emission_color) * emission_intensity).to_array();
+                    changed = true;
                 }
             });
 
@@ -124,15 +127,18 @@ pub fn show(
                 )
                 .changed();
             if intensity_changed {
-                edit = Some(MaterialEdit {
-                    material_id: material.material_id.clone(),
-                    albedo,
-                    emission: (Vec3::from_array(emission_color) * emission_intensity).to_array(),
-                });
+                emission = (Vec3::from_array(emission_color) * emission_intensity).to_array();
+                changed = true;
             }
         });
 
-    edit
+    changed.then(|| MaterialEdit {
+        material_id: material.material_id.clone(),
+        base_color,
+        metallic,
+        roughness,
+        emission,
+    })
 }
 
 pub fn show_light(root_ui: &mut egui::Ui, light: Option<&LightInspectorData>) -> Option<LightEdit> {

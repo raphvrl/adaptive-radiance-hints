@@ -3,6 +3,9 @@ use std::collections::HashMap;
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
+pub const DEFAULT_MATERIAL_METALLIC: f32 = 0.0;
+pub const DEFAULT_MATERIAL_ROUGHNESS: f32 = 0.5;
+
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct MaterialId(pub String);
@@ -15,7 +18,9 @@ impl MaterialId {
 
 #[derive(Clone, Copy, Debug)]
 pub struct Material {
-    pub albedo: Vec3,
+    pub base_color: Vec3,
+    pub metallic: f32,
+    pub roughness: f32,
     pub emission: Vec3,
 }
 

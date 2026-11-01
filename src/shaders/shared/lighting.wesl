@@ -45,6 +45,8 @@ var shadow_atlas: texture_depth_2d;
 var shadow_sampler: sampler_comparison;
 
 const SHADOW_FILTER_RADIUS_TEXELS: f32 = 1.5;
+const PI: f32 = 3.14159265359;
+const MIN_ROUGHNESS: f32 = 0.045;
 
 const VOGEL_DISK_OFFSETS: array<vec2f, 16> = array<vec2f, 16>(
     vec2f(0.176777, 0.000000),
@@ -181,11 +183,42 @@ fn shadow_visibility(
     return visibility / 16.0;
 }
 
+fn fresnel_schlick(cos_theta: f32, f0: vec3f) -> vec3f {
+    let factor = pow(1.0 - clamp(cos_theta, 0.0, 1.0), 5.0);
+    return f0 + (vec3f(1.0) - f0) * factor;
+}
+
+fn distribution_ggx(n_dot_h: f32, roughness: f32) -> f32 {
+    let alpha = roughness * roughness;
+    let alpha_squared = alpha * alpha;
+    let denominator = n_dot_h * n_dot_h * (alpha_squared - 1.0) + 1.0;
+
+    return alpha_squared / max(PI * denominator * denominator, 0.000001);
+}
+
+fn visibility_smith_ggx_correlated(
+    n_dot_v: f32,
+    n_dot_l: f32,
+    roughness: f32,
+) -> f32 {
+    let alpha = roughness * roughness;
+    let alpha_squared = alpha * alpha;
+    let visibility_v = n_dot_l
+        * sqrt(n_dot_v * n_dot_v * (1.0 - alpha_squared) + alpha_squared);
+    let visibility_l = n_dot_v
+        * sqrt(n_dot_l * n_dot_l * (1.0 - alpha_squared) + alpha_squared);
+
+    return 0.5 / max(visibility_v + visibility_l, 0.0001);
+}
+
 fn evaluate_light(
     light: GpuLight,
     world_position: vec3f,
     normal: vec3f,
-    albedo: vec3f,
+    view_direction: vec3f,
+    base_color: vec3f,
+    metallic: f32,
+    roughness: f32,
 ) -> vec3f {
     let to_light = light.position - world_position;
     let light_distance = length(to_light);
@@ -196,7 +229,24 @@ fn evaluate_light(
     }
 
     let direction_to_light = to_light / light_distance;
-    let diffuse = max(dot(normal, direction_to_light), 0.0);
+    let n_dot_l = max(dot(normal, direction_to_light), 0.0);
+    let n_dot_v = max(dot(normal, view_direction), 0.0);
+    if n_dot_l <= 0.0 || n_dot_v <= 0.0 {
+        return vec3f(0.0);
+    }
+
+    let half_direction = normalize(view_direction + direction_to_light);
+    let n_dot_h = max(dot(normal, half_direction), 0.0);
+    let h_dot_v = max(dot(half_direction, view_direction), 0.0);
+    let f0 = mix(vec3f(0.04), base_color, metallic);
+    let fresnel = fresnel_schlick(h_dot_v, f0);
+    let distribution = distribution_ggx(n_dot_h, roughness);
+    let visibility_term = visibility_smith_ggx_correlated(n_dot_v, n_dot_l, roughness);
+
+    let diffuse_weight = (vec3f(1.0) - fresnel) * (1.0 - metallic);
+    let diffuse = diffuse_weight * base_color / PI;
+    let specular = distribution * visibility_term * fresnel;
+
     let attenuation = light_attenuation(light_distance, light.range);
     let spot = spot_factor(light, -direction_to_light);
     let visibility = shadow_visibility(
@@ -207,10 +257,18 @@ fn evaluate_light(
         light_distance,
     );
 
-    return albedo * light.color * light.intensity * diffuse * attenuation * spot * visibility;
+    let radiance = light.color * light.intensity * attenuation * spot * visibility;
+    return (diffuse + specular) * radiance * n_dot_l;
 }
 
-fn direct_lighting(world_position: vec3f, normal: vec3f, albedo: vec3f) -> vec3f {
+fn direct_lighting(
+    world_position: vec3f,
+    normal: vec3f,
+    view_direction: vec3f,
+    base_color: vec3f,
+    metallic: f32,
+    roughness: f32,
+) -> vec3f {
     var color = vec3f(0.0);
 
     for (var i = 0u; i < light_buffer.length; i += 1u) {
@@ -218,27 +276,55 @@ fn direct_lighting(world_position: vec3f, normal: vec3f, albedo: vec3f) -> vec3f
             light_buffer.lights[i],
             world_position,
             normal,
-            albedo,
+            view_direction,
+            base_color,
+            metallic,
+            roughness,
         );
     }
 
     return color;
 }
 
-fn ambient_lighting(albedo: vec3f, color: vec3f, intensity: f32) -> vec3f {
-    return albedo * color * intensity;
+fn ambient_lighting(
+    base_color: vec3f,
+    metallic: f32,
+    color: vec3f,
+    intensity: f32,
+) -> vec3f {
+    return base_color * (1.0 - metallic) * color * intensity;
 }
 
 fn shade_surface(
     world_position: vec3f,
     normal: vec3f,
-    albedo: vec3f,
+    camera_position: vec3f,
+    base_color: vec3f,
+    metallic: f32,
+    roughness: f32,
     emission: vec3f,
     ambient_color: vec3f,
     ambient_intensity: f32,
 ) -> vec3f {
-    let ambient = ambient_lighting(albedo, ambient_color, ambient_intensity);
-    let direct = direct_lighting(world_position, normal, albedo);
+    let to_camera = camera_position - world_position;
+    let view_direction = to_camera / max(length(to_camera), 0.0001);
+    let surface_metallic = clamp(metallic, 0.0, 1.0);
+    let surface_roughness = clamp(roughness, MIN_ROUGHNESS, 1.0);
+
+    let ambient = ambient_lighting(
+        base_color,
+        surface_metallic,
+        ambient_color,
+        ambient_intensity,
+    );
+    let direct = direct_lighting(
+        world_position,
+        normal,
+        view_direction,
+        base_color,
+        surface_metallic,
+        surface_roughness,
+    );
 
     return emission + ambient + direct;
 }

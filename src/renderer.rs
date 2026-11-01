@@ -135,6 +135,7 @@ impl Renderer {
         encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
         view_proj: Mat4,
+        camera_position: Vec3,
         renderables: &[MeshInstance],
         point_lights: &[PointLightInstance],
         spot_lights: &[SpotLightInstance],
@@ -152,6 +153,7 @@ impl Renderer {
                     ambient_lighting.color.z,
                     ambient_lighting.intensity,
                 ),
+                camera_position: camera_position.extend(1.0),
             },
         )?;
         let batches = self.instances.write(device, queue, renderables)?;

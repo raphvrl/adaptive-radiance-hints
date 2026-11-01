@@ -6,10 +6,10 @@ use crate::scene::{
         DEFAULT_SPOT_SHADOW_BIAS, MAX_SHADOW_BIAS, MAX_SHADOW_NORMAL_BIAS,
         POINT_SHADOW_FACE_COUNT, SHADOW_RESOLUTION_OPTIONS,
     },
-    materials::MaterialId,
+    materials::{DEFAULT_MATERIAL_METALLIC, DEFAULT_MATERIAL_ROUGHNESS, MaterialId},
 };
 
-pub const SCENE_FORMAT_VERSION: u32 = 5;
+pub const SCENE_FORMAT_VERSION: u32 = 6;
 const MAX_LEGACY_SHADOW_DEPTH_BIAS: f32 = 0.002;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -57,8 +57,21 @@ pub struct MeshData {
 #[serde(deny_unknown_fields)]
 pub struct MaterialData {
     pub id: MaterialId,
-    pub albedo: [f32; 3],
+    #[serde(alias = "albedo")]
+    pub base_color: [f32; 3],
+    #[serde(default = "default_material_metallic")]
+    pub metallic: f32,
+    #[serde(default = "default_material_roughness")]
+    pub roughness: f32,
     pub emission: [f32; 3],
+}
+
+fn default_material_metallic() -> f32 {
+    DEFAULT_MATERIAL_METALLIC
+}
+
+fn default_material_roughness() -> f32 {
+    DEFAULT_MATERIAL_ROUGHNESS
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -183,10 +196,18 @@ impl SceneFile {
             );
             ensure!(
                 material
-                    .albedo
+                    .base_color
                     .into_iter()
                     .all(|value| value.is_finite() && (0.0..=1.0).contains(&value)),
-                "material '{id}' has an invalid albedo"
+                "material '{id}' has an invalid base color"
+            );
+            ensure!(
+                material.metallic.is_finite() && (0.0..=1.0).contains(&material.metallic),
+                "material '{id}' has an invalid metallic value"
+            );
+            ensure!(
+                material.roughness.is_finite() && (0.0..=1.0).contains(&material.roughness),
+                "material '{id}' has an invalid roughness value"
             );
             ensure!(
                 material

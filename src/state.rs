@@ -168,7 +168,9 @@ impl State {
 
         let size = self.window.inner_size();
         let aspect_ratio = size.width as f32 / size.height as f32;
-        let view_proj = self.scene.camera_view_projection(aspect_ratio)?;
+        let (view_proj, camera_position) = self
+            .scene
+            .camera_view_projection_and_position(aspect_ratio)?;
         let material = self.selected_material_inspector();
         let light = self.selected_light_inspector();
         let mut ui_frame = self.ui.run(
@@ -235,6 +237,7 @@ impl State {
             &mut encoder,
             &view,
             view_proj,
+            camera_position,
             &renderables,
             &point_lights,
             &spot_lights,
@@ -317,7 +320,9 @@ impl State {
         Some(MaterialInspectorData {
             entity_name,
             material_id,
-            albedo: material.albedo.to_array(),
+            base_color: material.base_color.to_array(),
+            metallic: material.metallic,
+            roughness: material.roughness,
             emission: material.emission.to_array(),
             users,
         })
@@ -478,7 +483,9 @@ impl State {
             return;
         };
 
-        material.albedo = glam::Vec3::from_array(edit.albedo);
+        material.base_color = glam::Vec3::from_array(edit.base_color);
+        material.metallic = edit.metallic;
+        material.roughness = edit.roughness;
         material.emission = glam::Vec3::from_array(edit.emission);
     }
 
