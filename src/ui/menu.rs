@@ -1,16 +1,16 @@
-use crate::editor::ViewMode;
-
 use super::AddLightKind;
 
 pub fn show(
     root_ui: &mut egui::Ui,
-    current_view_mode: ViewMode,
+    current_light_markers: bool,
     show_ambient_window: &mut bool,
-) -> (bool, bool, Option<AddLightKind>, Option<ViewMode>) {
+    current_tile_heatmap: bool,
+) -> (bool, bool, Option<AddLightKind>, Option<bool>, Option<bool>) {
     let mut quit_requested = false;
     let mut save_requested = false;
     let mut add_light = None;
-    let mut show_light_markers = current_view_mode == ViewMode::LightMarkers;
+    let mut show_light_markers = current_light_markers;
+    let mut show_tile_heatmap = current_tile_heatmap;
 
     egui::Panel::top("main_menu_bar")
         .frame(egui::Frame::side_top_panel(root_ui.style()))
@@ -41,6 +41,9 @@ pub fn show(
 
                 ui.menu_button("View", |ui| {
                     ui.checkbox(&mut show_light_markers, "Light Markers");
+                    ui.menu_button("Debug", |ui| {
+                        ui.checkbox(&mut show_tile_heatmap, "Tile Light Heatmap");
+                    });
                     ui.separator();
                     ui.checkbox(show_ambient_window, "Ambient Lighting");
                 });
@@ -52,16 +55,21 @@ pub fn show(
                     ui.label("Right mouse + move: look");
                     ui.label("Left mouse: select object or drag gizmo");
                     ui.label("Delete: remove selected object");
+                    ui.label("Tile heatmap colors show lights per tile; white means overflow");
                 });
             });
         });
 
-    let view_mode = if show_light_markers {
-        ViewMode::LightMarkers
-    } else {
-        ViewMode::Scene
-    };
-    let changed_view_mode = (view_mode != current_view_mode).then_some(view_mode);
+    let changed_light_markers =
+        (show_light_markers != current_light_markers).then_some(show_light_markers);
+    let changed_tile_heatmap =
+        (show_tile_heatmap != current_tile_heatmap).then_some(show_tile_heatmap);
 
-    (quit_requested, save_requested, add_light, changed_view_mode)
+    (
+        quit_requested,
+        save_requested,
+        add_light,
+        changed_light_markers,
+        changed_tile_heatmap,
+    )
 }

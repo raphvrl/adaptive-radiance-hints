@@ -19,7 +19,7 @@ impl DepthTarget {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
 

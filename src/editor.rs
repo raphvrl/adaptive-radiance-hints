@@ -19,13 +19,6 @@ pub enum TransformMode {
     Scale,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum ViewMode {
-    #[default]
-    Scene,
-    LightMarkers,
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Axis {
     X,
@@ -97,7 +90,6 @@ pub enum LightGizmo {
 pub struct EditorState {
     selected_entity: Option<Entity>,
     mode: TransformMode,
-    view_mode: ViewMode,
     drag: Option<ActiveDrag>,
 }
 
@@ -140,17 +132,9 @@ impl EditorState {
         self.selected_entity
     }
 
-    pub fn view_mode(&self) -> ViewMode {
-        self.view_mode
-    }
-
     pub fn set_mode(&mut self, mode: TransformMode) {
         self.mode = mode;
         self.drag = None;
-    }
-
-    pub fn set_view_mode(&mut self, mode: ViewMode) {
-        self.view_mode = mode;
     }
 
     pub fn select(&mut self, entity: Option<Entity>) {

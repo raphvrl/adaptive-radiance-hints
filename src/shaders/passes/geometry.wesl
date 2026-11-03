@@ -73,6 +73,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4f {
     let normal = normalize(input.normal);
     let color = shade_surface(
         input.world_position,
+        input.position.xy,
         normal,
         frame.camera_position.xyz,
         input.base_color,

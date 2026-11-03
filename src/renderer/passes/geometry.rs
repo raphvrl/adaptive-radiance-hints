@@ -7,6 +7,7 @@ use crate::renderer::{
 };
 
 pub struct GeometryPass {
+    depth_pipeline: wgpu::RenderPipeline,
     pipeline: wgpu::RenderPipeline,
 }
 
@@ -17,6 +18,7 @@ impl GeometryPass {
         frame_layout: &wgpu::BindGroupLayout,
         lights_layout: &wgpu::BindGroupLayout,
         shadows_layout: &wgpu::BindGroupLayout,
+        tiles_layout: &wgpu::BindGroupLayout,
     ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Geometry shader"),
@@ -27,11 +29,42 @@ impl GeometryPass {
             Some(frame_layout),
             Some(lights_layout),
             Some(shadows_layout),
+            Some(tiles_layout),
         ];
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Geometry pipeline layout"),
             bind_group_layouts: &bind_group_layouts,
             immediate_size: 0,
+        });
+
+        let depth_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Depth prepass pipeline layout"),
+                bind_group_layouts: &[Some(frame_layout)],
+                immediate_size: 0,
+            });
+
+        let depth_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Depth prepass pipeline"),
+            layout: Some(&depth_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: None,
+                compilation_options: Default::default(),
+                buffers: &[Some(MeshVertex::LAYOUT), Some(InstanceRaw::LAYOUT)],
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: crate::renderer::depth::FORMAT,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            fragment: None,
+            multiview_mask: None,
+            cache: None,
         });
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -46,8 +79,8 @@ impl GeometryPass {
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: crate::renderer::depth::FORMAT,
-                depth_write_enabled: Some(true),
-                depth_compare: Some(wgpu::CompareFunction::Less),
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::Equal),
                 stencil: Default::default(),
                 bias: Default::default(),
             }),
@@ -66,7 +99,51 @@ impl GeometryPass {
             cache: None,
         });
 
-        Self { pipeline }
+        Self {
+            depth_pipeline,
+            pipeline,
+        }
+    }
+
+    pub fn encode_depth(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        depth: &wgpu::TextureView,
+        frame_bind_group: &wgpu::BindGroup,
+        assets: &MeshAssets,
+        instances: &InstanceBuffer,
+        batches: &[MeshBatch],
+    ) -> anyhow::Result<()> {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Depth prepass"),
+            color_attachments: &[],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: depth,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            occlusion_query_set: None,
+            timestamp_writes: None,
+            multiview_mask: None,
+        });
+
+        pass.set_pipeline(&self.depth_pipeline);
+        pass.set_bind_group(0, frame_bind_group, &[]);
+        pass.set_vertex_buffer(1, instances.buffer().slice(..));
+
+        for batch in batches {
+            let mesh = assets.get(batch.mesh)?;
+            let end_instance = batch.first_instance + batch.instance_count;
+
+            pass.set_vertex_buffer(0, mesh.vertex_buffer().slice(..));
+            pass.set_index_buffer(mesh.index_buffer().slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..mesh.index_count(), 0, batch.first_instance..end_instance);
+        }
+
+        Ok(())
     }
 
     pub fn encode(
@@ -77,6 +154,7 @@ impl GeometryPass {
         frame_bind_group: &wgpu::BindGroup,
         lights_bind_group: &wgpu::BindGroup,
         shadows_bind_group: &wgpu::BindGroup,
+        tiles_bind_group: &wgpu::BindGroup,
         assets: &MeshAssets,
         instances: &InstanceBuffer,
         batches: &[MeshBatch],
@@ -100,7 +178,7 @@ impl GeometryPass {
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                 view: depth,
                 depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.0),
+                    load: wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 }),
                 stencil_ops: None,
@@ -114,6 +192,7 @@ impl GeometryPass {
         pass.set_bind_group(0, frame_bind_group, &[]);
         pass.set_bind_group(1, lights_bind_group, &[]);
         pass.set_bind_group(2, shadows_bind_group, &[]);
+        pass.set_bind_group(3, tiles_bind_group, &[]);
         pass.set_vertex_buffer(1, instances.buffer().slice(..));
 
         for batch in batches {

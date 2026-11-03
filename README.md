@@ -1,1 +1,0 @@
-# adaptive-radiance-hints

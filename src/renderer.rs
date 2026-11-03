@@ -7,6 +7,7 @@ mod instances;
 mod lights;
 mod passes;
 mod shadows;
+mod tiles;
 
 pub mod mesh;
 pub mod meshes;
@@ -27,8 +28,9 @@ use hdr::HdrTarget;
 use instances::InstanceBuffer;
 use lights::LightBuffer;
 use mesh::MeshData;
-use passes::{GeometryPass, GizmoPass, SelectionPass, TonemapPass};
+use passes::{CullingPass, GeometryPass, GizmoPass, HeatmapPass, SelectionPass, TonemapPass};
 use shadows::{ShadowAtlas, ShadowPass, ShadowPlan};
+use tiles::TileLists;
 
 #[derive(Clone, Copy, Debug)]
 pub struct AmbientLighting {
@@ -50,6 +52,9 @@ pub struct Renderer {
     lights: LightBuffer,
     hdr: HdrTarget,
     geometry: GeometryPass,
+    culling: CullingPass,
+    heatmap: HeatmapPass,
+    tiles: TileLists,
     tonemap: TonemapPass,
     selection: SelectionPass,
     gizmo: GizmoPass,
@@ -72,17 +77,21 @@ impl Renderer {
         let lights = LightBuffer::new(device)?;
         let hdr = HdrTarget::new(device, width, height);
         let shadow_atlas = ShadowAtlas::new(device)?;
+        let depth = DepthTarget::new(device, width, height);
+        let tiles = TileLists::new(device, width, height);
         let geometry = GeometryPass::new(
             device,
             hdr::FORMAT,
             frame.layout(),
             lights.layout(),
             shadow_atlas.layout(),
+            tiles.geometry_layout(),
         );
+        let culling = CullingPass::new(device, lights.layout(), &tiles, depth.view());
+        let heatmap = HeatmapPass::new(device, target_format, tiles.geometry_layout());
         let tonemap = TonemapPass::new(device, target_format, hdr.view())?;
         let selection = SelectionPass::new(device, target_format, frame.layout());
         let gizmo = GizmoPass::new(device, target_format, frame.layout());
-        let depth = DepthTarget::new(device, width, height);
         let shadow_pass = ShadowPass::new(device)?;
         let instances = InstanceBuffer::new(device)?;
 
@@ -91,6 +100,9 @@ impl Renderer {
             lights,
             hdr,
             geometry,
+            culling,
+            heatmap,
+            tiles,
             tonemap,
             selection,
             gizmo,
@@ -114,6 +126,8 @@ impl Renderer {
 
         self.depth.resize(device, width, height);
         self.hdr.resize(device, width, height);
+        self.tiles.resize(device, width, height);
+        self.culling.set_depth_view(device, self.depth.view());
         self.tonemap.set_hdr_view(device, self.hdr.view());
     }
 
@@ -141,6 +155,7 @@ impl Renderer {
         point_lights: &[PointLightInstance],
         spot_lights: &[SpotLightInstance],
         ambient_lighting: AmbientLighting,
+        show_tile_heatmap: bool,
         gizmo_draw: Option<GizmoDraw>,
         light_markers: &[LightMarkerDraw],
     ) -> Result<()> {
@@ -190,6 +205,23 @@ impl Renderer {
             &mut shadow_plan.views,
         )?;
 
+        self.geometry.encode_depth(
+            encoder,
+            self.depth.view(),
+            self.frame.bind_group(),
+            &self.assets,
+            &self.instances,
+            &batches,
+        )?;
+
+        self.culling.encode(
+            queue,
+            encoder,
+            view_proj,
+            self.lights.bind_group(),
+            &self.tiles,
+        );
+
         self.geometry.encode(
             encoder,
             self.hdr.view(),
@@ -197,12 +229,18 @@ impl Renderer {
             self.frame.bind_group(),
             self.lights.bind_group(),
             self.shadow_atlas.bind_group(),
+            self.tiles.geometry_bind_group(),
             &self.assets,
             &self.instances,
             &batches,
         )?;
 
         self.tonemap.encode(encoder, view);
+
+        if show_tile_heatmap {
+            self.heatmap
+                .encode(encoder, view, self.tiles.geometry_bind_group());
+        }
 
         self.selection.encode(
             queue,

@@ -5,7 +5,7 @@ mod paint;
 
 use std::time::Duration;
 
-use crate::{editor::ViewMode, renderer::AmbientLighting};
+use crate::renderer::AmbientLighting;
 use winit::{event::WindowEvent, window::Window};
 
 pub use inspector::{LightEdit, LightInspectorData, MaterialEdit, MaterialInspectorData};
@@ -24,7 +24,8 @@ pub struct UiResponse {
     pub light_edit: Option<LightEdit>,
     pub ambient_lighting_edit: Option<AmbientLighting>,
     pub repaint_delay: Duration,
-    pub view_mode: Option<ViewMode>,
+    pub show_light_markers: Option<bool>,
+    pub tile_heatmap: Option<bool>,
 }
 
 pub struct UiFrame {
@@ -78,10 +79,11 @@ impl Ui {
     pub fn run(
         &mut self,
         window: &Window,
-        view_mode: ViewMode,
+        show_light_markers: bool,
         material: Option<MaterialInspectorData>,
         light: Option<LightInspectorData>,
         ambient_lighting: AmbientLighting,
+        show_tile_heatmap: bool,
     ) -> UiFrame {
         let input = self.platform.take_egui_input(window);
 
@@ -89,15 +91,21 @@ impl Ui {
         let mut material_edit = None;
         let mut light_edit = None;
         let mut ambient_lighting_edit = None;
-        let mut view_mode_change = None;
+        let mut light_markers_change = None;
+        let mut tile_heatmap_change = None;
         let mut show_ambient_window = self.show_ambient_window;
         let mut output = self.context.run_ui(input, |root_ui| {
-            let (quit, save, new_light, selected_view_mode) =
-                menu::show(root_ui, view_mode, &mut show_ambient_window);
+            let (quit, save, new_light, selected_light_markers, selected_tile_heatmap) = menu::show(
+                root_ui,
+                show_light_markers,
+                &mut show_ambient_window,
+                show_tile_heatmap,
+            );
             quit_requested |= quit;
             save_requested |= save;
             add_light = new_light;
-            view_mode_change = selected_view_mode;
+            light_markers_change = selected_light_markers;
+            tile_heatmap_change = selected_tile_heatmap;
 
             material_edit = inspector::show(root_ui, material.as_ref());
             light_edit = inspector::show_light(root_ui, light.as_ref());
@@ -123,7 +131,8 @@ impl Ui {
                 light_edit,
                 ambient_lighting_edit,
                 repaint_delay,
-                view_mode: view_mode_change,
+                show_light_markers: light_markers_change,
+                tile_heatmap: tile_heatmap_change,
             },
         }
     }

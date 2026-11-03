@@ -15,7 +15,7 @@ use winit::{
 
 use crate::{
     clock::Clock,
-    editor::{EditorState, TransformMode, ViewMode},
+    editor::{EditorState, TransformMode},
     gpu::Gpu,
     input::{Input, InputButton},
     renderer::{AmbientLighting, Renderer},
@@ -39,12 +39,14 @@ pub struct State {
     editor: EditorState,
     renderer: Renderer,
     ambient_lighting: AmbientLighting,
+    show_light_markers: bool,
+    show_tile_heatmap: bool,
     ui: Ui,
     scene_path: PathBuf,
 }
 
 impl State {
-    pub async fn new(window: Arc<Window>) -> Result<Self> {
+    pub async fn new(window: Arc<Window>, scene_path: Option<PathBuf>) -> Result<Self> {
         let gpu = Gpu::new(Arc::clone(&window)).await?;
 
         let input = Input::default();
@@ -57,10 +59,12 @@ impl State {
         let cube_mesh = renderer.register_mesh(gpu.device(), &crate::renderer::meshes::cube())?;
 
         let mesh_assets = HashMap::from([("builtin:cube".to_owned(), cube_mesh)]);
-        let scene_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("assets")
-            .join("scenes")
-            .join("cornell.ron");
+        let scene_path = scene_path.unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("assets")
+                .join("scenes")
+                .join("cornell.ron")
+        });
         let scene = crate::scene::io::load_scene(&scene_path, &mesh_assets)?;
 
         let ui = Ui::new(&window, gpu.device(), gpu.surface_format());
@@ -74,6 +78,8 @@ impl State {
             editor: EditorState::default(),
             renderer,
             ambient_lighting: AmbientLighting::default(),
+            show_light_markers: false,
+            show_tile_heatmap: false,
             ui,
             scene_path,
         })
@@ -175,14 +181,18 @@ impl State {
         let light = self.selected_light_inspector();
         let mut ui_frame = self.ui.run(
             &self.window,
-            self.editor.view_mode(),
+            self.show_light_markers,
             material,
             light,
             self.ambient_lighting,
+            self.show_tile_heatmap,
         );
 
-        if let Some(mode) = ui_frame.response.view_mode {
-            self.editor.set_view_mode(mode);
+        if let Some(show) = ui_frame.response.show_light_markers {
+            self.show_light_markers = show;
+        }
+        if let Some(show) = ui_frame.response.tile_heatmap {
+            self.show_tile_heatmap = show;
         }
         if let Some(edit) = ui_frame.response.material_edit.take() {
             self.apply_material_edit(edit);
@@ -213,7 +223,7 @@ impl State {
         let point_lights = self.scene.point_lights();
         let spot_lights = self.scene.spot_lights();
         let gizmo_draw = self.editor.gizmo_draw(&self.scene, size.height as f32);
-        let light_markers = if self.editor.view_mode() == ViewMode::LightMarkers {
+        let light_markers = if self.show_light_markers {
             self.editor
                 .light_marker_draws(&self.scene, size.height as f32)
         } else {
@@ -242,6 +252,7 @@ impl State {
             &point_lights,
             &spot_lights,
             self.ambient_lighting,
+            self.show_tile_heatmap,
             gizmo_draw,
             &light_markers,
         )?;

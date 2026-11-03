@@ -1,25 +1,5 @@
-struct GpuLight {
-    position: vec3f,
-    range: f32,
-
-    direction: vec3f,
-    inner_cos: f32,
-
-    color: vec3f,
-    intensity: f32,
-
-    outer_cos: f32,
-    is_spot: u32,
-    shadow_index: u32,
-    shadow_normal_bias: f32,
-    shadow_resolution: u32,
-    shadow_bias: f32,
-}
-
-struct Lights {
-    length: u32,
-    lights: array<GpuLight>,
-}
+import package::shared::lights::GpuLight;
+import package::shared::lights::Lights;
 
 @group(1) @binding(0)
 var<storage, read> light_buffer: Lights;
@@ -43,6 +23,19 @@ var shadow_atlas: texture_depth_2d;
 
 @group(2) @binding(2)
 var shadow_sampler: sampler_comparison;
+
+struct TileParams {
+    tiles_x: u32,
+    tiles_y: u32,
+    tile_size: u32,
+    max_lights_per_tile: u32,
+}
+
+@group(3) @binding(0)
+var<storage, read> tile_data: array<u32>;
+
+@group(3) @binding(1)
+var<uniform> tile_params: TileParams;
 
 const SHADOW_FILTER_RADIUS_TEXELS: f32 = 1.5;
 const PI: f32 = 3.14159265359;
@@ -262,6 +255,7 @@ fn evaluate_light(
 
 fn direct_lighting(
     world_position: vec3f,
+    screen_position: vec2f,
     normal: vec3f,
     view_direction: vec3f,
     base_color: vec3f,
@@ -269,10 +263,27 @@ fn direct_lighting(
     roughness: f32,
 ) -> vec3f {
     var color = vec3f(0.0);
+    let tile_xy = vec2u(screen_position) / tile_params.tile_size;
+    let tile_index = tile_xy.y * tile_params.tiles_x + tile_xy.x;
+    let header_offset = tile_index * 2u;
+    let header_count = tile_data[header_offset];
+    let overflow = tile_data[header_offset + 1u];
+    let index_offset = tile_params.tiles_x * tile_params.tiles_y * 2u
+        + tile_index * tile_params.max_lights_per_tile;
+    var light_count = header_count;
 
-    for (var i = 0u; i < light_buffer.length; i += 1u) {
+    if overflow != 0u {
+        light_count = light_buffer.length;
+    }
+
+    for (var i = 0u; i < light_count; i += 1u) {
+        var light_index = i;
+        if overflow == 0u {
+            light_index = tile_data[index_offset + i];
+        }
+
         color += evaluate_light(
-            light_buffer.lights[i],
+            light_buffer.lights[light_index],
             world_position,
             normal,
             view_direction,
@@ -296,6 +307,7 @@ fn ambient_lighting(
 
 fn shade_surface(
     world_position: vec3f,
+    screen_position: vec2f,
     normal: vec3f,
     camera_position: vec3f,
     base_color: vec3f,
@@ -319,6 +331,7 @@ fn shade_surface(
 
     let direct = direct_lighting(
         world_position,
+        screen_position,
         normal,
         view_direction,
         base_color,

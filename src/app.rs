@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use anyhow::{Context, Result};
 use glam::Vec2;
@@ -16,6 +16,7 @@ use crate::{input::InputButton, state::State};
 pub struct App {
     state: Option<State>,
     error: Option<anyhow::Error>,
+    scene_path: Option<PathBuf>,
 }
 
 impl ApplicationHandler for App {
@@ -46,7 +47,7 @@ impl ApplicationHandler for App {
             }
         };
 
-        match pollster::block_on(State::new(window)) {
+        match pollster::block_on(State::new(window, self.scene_path.clone())) {
             Ok(state) => {
                 state.request_redraw();
                 self.state = Some(state);
@@ -142,7 +143,10 @@ impl ApplicationHandler for App {
 pub fn run() -> Result<()> {
     let event_loop = EventLoop::new().context("failed to create event loop")?;
     event_loop.set_control_flow(ControlFlow::Wait);
-    let mut app = App::default();
+    let mut app = App {
+        scene_path: std::env::args_os().nth(1).map(PathBuf::from),
+        ..App::default()
+    };
 
     event_loop.run_app(&mut app).context("event loop failed")?;
 
