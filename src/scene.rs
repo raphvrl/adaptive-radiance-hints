@@ -16,6 +16,7 @@ use crate::{handle::MeshHandle, input::Input};
 use materials::{DEFAULT_MATERIAL_METALLIC, DEFAULT_MATERIAL_ROUGHNESS, MaterialLibrary};
 
 pub struct MeshInstance {
+    pub entity: Entity,
     pub mesh: MeshHandle,
     pub model: Mat4,
     pub base_color: Vec3,
@@ -72,6 +73,7 @@ impl Scene {
                     material_ref.and_then(|material_ref| self.materials.get(&material_ref.0));
 
                 MeshInstance {
+                    entity,
                     mesh: mesh.handle,
                     model: model_matrix(transform),
                     base_color: material.map_or(Vec3::ONE, |material| material.base_color),

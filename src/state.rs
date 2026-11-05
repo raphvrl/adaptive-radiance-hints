@@ -41,6 +41,7 @@ pub struct State {
     ambient_lighting: AmbientLighting,
     show_light_markers: bool,
     show_tile_heatmap: bool,
+    show_voxel_debug: bool,
     ui: Ui,
     scene_path: PathBuf,
 }
@@ -66,6 +67,7 @@ impl State {
                 .join("cornell.ron")
         });
         let scene = crate::scene::io::load_scene(&scene_path, &mesh_assets)?;
+        renderer.mark_voxel_scene_dirty();
 
         let ui = Ui::new(&window, gpu.device(), gpu.surface_format());
 
@@ -80,6 +82,7 @@ impl State {
             ambient_lighting: AmbientLighting::default(),
             show_light_markers: false,
             show_tile_heatmap: false,
+            show_voxel_debug: false,
             ui,
             scene_path,
         })
@@ -186,6 +189,7 @@ impl State {
             light,
             self.ambient_lighting,
             self.show_tile_heatmap,
+            self.show_voxel_debug,
         );
 
         if let Some(show) = ui_frame.response.show_light_markers {
@@ -193,6 +197,9 @@ impl State {
         }
         if let Some(show) = ui_frame.response.tile_heatmap {
             self.show_tile_heatmap = show;
+        }
+        if let Some(show) = ui_frame.response.voxel_debug {
+            self.show_voxel_debug = show;
         }
         if let Some(edit) = ui_frame.response.material_edit.take() {
             self.apply_material_edit(edit);
@@ -253,6 +260,7 @@ impl State {
             &spot_lights,
             self.ambient_lighting,
             self.show_tile_heatmap,
+            self.show_voxel_debug,
             gizmo_draw,
             &light_markers,
         )?;
@@ -314,6 +322,8 @@ impl State {
 
         self.editor
             .update_drag(&mut self.scene, cursor, viewport, view_proj);
+
+        self.mark_voxel_scene_dirty();
     }
 
     fn selected_material_inspector(&self) -> Option<MaterialInspectorData> {
@@ -512,7 +522,12 @@ impl State {
 
         if self.scene.world.despawn(entity).is_ok() {
             self.editor.select(None);
+            self.mark_voxel_scene_dirty();
         }
+    }
+
+    fn mark_voxel_scene_dirty(&mut self) {
+        self.renderer.mark_voxel_scene_dirty();
     }
 
     fn viewport_and_view_projection(&self) -> Option<(Vec2, Mat4)> {

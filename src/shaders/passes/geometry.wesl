@@ -30,7 +30,7 @@ struct Instance {
 }
 
 struct VertexOutput {
-    @builtin(position) position: vec4f,
+    @builtin(position) @invariant position: vec4f,
     @location(0) normal: vec3f,
     @location(1) base_color: vec3f,
     @location(2) metallic: f32,

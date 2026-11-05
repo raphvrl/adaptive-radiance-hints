@@ -11,6 +11,7 @@ mod tiles;
 
 pub mod mesh;
 pub mod meshes;
+pub mod voxel;
 
 use anyhow::Result;
 use glam::{Mat4, Vec3, Vec4};
@@ -28,7 +29,10 @@ use hdr::HdrTarget;
 use instances::InstanceBuffer;
 use lights::LightBuffer;
 use mesh::MeshData;
-use passes::{CullingPass, GeometryPass, GizmoPass, HeatmapPass, SelectionPass, TonemapPass};
+use passes::{
+    CullingPass, GeometryPass, GizmoPass, HeatmapPass, SelectionPass, TonemapPass,
+    VoxelComputePass, VoxelDebugPass,
+};
 use shadows::{ShadowAtlas, ShadowPass, ShadowPlan};
 use tiles::TileLists;
 
@@ -58,12 +62,15 @@ pub struct Renderer {
     tonemap: TonemapPass,
     selection: SelectionPass,
     gizmo: GizmoPass,
+    voxel_compute: VoxelComputePass,
+    voxel_debug: VoxelDebugPass,
     depth: DepthTarget,
     shadow_atlas: ShadowAtlas,
     shadow_pass: ShadowPass,
     last_shadow_plan: Option<ShadowPlan>,
     assets: MeshAssets,
     instances: InstanceBuffer,
+    voxel_scene_dirty: bool,
 }
 
 impl Renderer {
@@ -92,6 +99,13 @@ impl Renderer {
         let tonemap = TonemapPass::new(device, target_format, hdr.view())?;
         let selection = SelectionPass::new(device, target_format, frame.layout());
         let gizmo = GizmoPass::new(device, target_format, frame.layout());
+        let voxel_compute = VoxelComputePass::new(device);
+        let voxel_debug = VoxelDebugPass::new(
+            device,
+            target_format,
+            frame.layout(),
+            voxel_compute.debug_buffers(),
+        );
         let shadow_pass = ShadowPass::new(device)?;
         let instances = InstanceBuffer::new(device)?;
 
@@ -106,17 +120,28 @@ impl Renderer {
             tonemap,
             selection,
             gizmo,
+            voxel_compute,
+            voxel_debug,
             depth,
             shadow_atlas,
             shadow_pass,
             last_shadow_plan: None,
             assets: MeshAssets::default(),
             instances,
+            voxel_scene_dirty: false,
         })
     }
 
     pub fn register_mesh(&mut self, device: &wgpu::Device, data: &MeshData) -> Result<MeshHandle> {
-        self.assets.insert(device, data)
+        let handle = self.assets.insert(device, data)?;
+        self.voxel_compute
+            .register_mesh(device, handle, self.assets.get(handle)?);
+
+        Ok(handle)
+    }
+
+    pub fn mark_voxel_scene_dirty(&mut self) {
+        self.voxel_scene_dirty = true;
     }
 
     pub fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {
@@ -156,6 +181,7 @@ impl Renderer {
         spot_lights: &[SpotLightInstance],
         ambient_lighting: AmbientLighting,
         show_tile_heatmap: bool,
+        show_voxel_debug: bool,
         gizmo_draw: Option<GizmoDraw>,
         light_markers: &[LightMarkerDraw],
     ) -> Result<()> {
@@ -176,6 +202,17 @@ impl Renderer {
         let selected_model = renderables
             .iter()
             .find_map(|instance| instance.selected.then_some(instance.model));
+
+        self.voxel_compute.update_view_region(camera_position)?;
+
+        if self.voxel_scene_dirty {
+            self.voxel_compute
+                .mark_scene_changed(renderables, &self.assets)?;
+            self.voxel_scene_dirty = false;
+        }
+        self.voxel_compute
+            .encode(device, queue, encoder, renderables)?;
+
         let world_bounds = renderables
             .iter()
             .map(|instance| {
@@ -241,6 +278,14 @@ impl Renderer {
             self.heatmap
                 .encode(encoder, view, self.tiles.geometry_bind_group());
         }
+
+        self.voxel_debug.encode(
+            encoder,
+            view,
+            self.depth.view(),
+            self.frame.bind_group(),
+            show_voxel_debug,
+        );
 
         self.selection.encode(
             queue,

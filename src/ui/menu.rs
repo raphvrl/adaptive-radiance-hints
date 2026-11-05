@@ -5,12 +5,21 @@ pub fn show(
     current_light_markers: bool,
     show_ambient_window: &mut bool,
     current_tile_heatmap: bool,
-) -> (bool, bool, Option<AddLightKind>, Option<bool>, Option<bool>) {
+    current_voxel_debug: bool,
+) -> (
+    bool,
+    bool,
+    Option<AddLightKind>,
+    Option<bool>,
+    Option<bool>,
+    Option<bool>,
+) {
     let mut quit_requested = false;
     let mut save_requested = false;
     let mut add_light = None;
     let mut show_light_markers = current_light_markers;
     let mut show_tile_heatmap = current_tile_heatmap;
+    let mut show_voxel_debug = current_voxel_debug;
 
     egui::Panel::top("main_menu_bar")
         .frame(egui::Frame::side_top_panel(root_ui.style()))
@@ -43,6 +52,7 @@ pub fn show(
                     ui.checkbox(&mut show_light_markers, "Light Markers");
                     ui.menu_button("Debug", |ui| {
                         ui.checkbox(&mut show_tile_heatmap, "Tile Light Heatmap");
+                        ui.checkbox(&mut show_voxel_debug, "Voxel Occupancy");
                     });
                     ui.separator();
                     ui.checkbox(show_ambient_window, "Ambient Lighting");
@@ -64,6 +74,7 @@ pub fn show(
         (show_light_markers != current_light_markers).then_some(show_light_markers);
     let changed_tile_heatmap =
         (show_tile_heatmap != current_tile_heatmap).then_some(show_tile_heatmap);
+    let changed_voxel_debug = (show_voxel_debug != current_voxel_debug).then_some(show_voxel_debug);
 
     (
         quit_requested,
@@ -71,5 +82,6 @@ pub fn show(
         add_light,
         changed_light_markers,
         changed_tile_heatmap,
+        changed_voxel_debug,
     )
 }

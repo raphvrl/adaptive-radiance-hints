@@ -19,7 +19,6 @@ pub struct PointLight {
     pub shadow_resolution: u32,
     pub shadow_bias: f32,
     pub shadow_normal_bias: f32,
-    /// Face order: +X, -X, +Y, -Y, +Z, -Z.
     pub shadow_faces_enabled: [bool; POINT_SHADOW_FACE_COUNT],
 }
 

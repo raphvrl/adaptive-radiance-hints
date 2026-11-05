@@ -26,6 +26,7 @@ pub struct UiResponse {
     pub repaint_delay: Duration,
     pub show_light_markers: Option<bool>,
     pub tile_heatmap: Option<bool>,
+    pub voxel_debug: Option<bool>,
 }
 
 pub struct UiFrame {
@@ -84,6 +85,7 @@ impl Ui {
         light: Option<LightInspectorData>,
         ambient_lighting: AmbientLighting,
         show_tile_heatmap: bool,
+        show_voxel_debug: bool,
     ) -> UiFrame {
         let input = self.platform.take_egui_input(window);
 
@@ -93,19 +95,29 @@ impl Ui {
         let mut ambient_lighting_edit = None;
         let mut light_markers_change = None;
         let mut tile_heatmap_change = None;
+        let mut voxel_debug_change = None;
         let mut show_ambient_window = self.show_ambient_window;
         let mut output = self.context.run_ui(input, |root_ui| {
-            let (quit, save, new_light, selected_light_markers, selected_tile_heatmap) = menu::show(
+            let (
+                quit,
+                save,
+                new_light,
+                selected_light_markers,
+                selected_tile_heatmap,
+                selected_voxel_debug,
+            ) = menu::show(
                 root_ui,
                 show_light_markers,
                 &mut show_ambient_window,
                 show_tile_heatmap,
+                show_voxel_debug,
             );
             quit_requested |= quit;
             save_requested |= save;
             add_light = new_light;
             light_markers_change = selected_light_markers;
             tile_heatmap_change = selected_tile_heatmap;
+            voxel_debug_change = selected_voxel_debug;
 
             material_edit = inspector::show(root_ui, material.as_ref());
             light_edit = inspector::show_light(root_ui, light.as_ref());
@@ -133,6 +145,7 @@ impl Ui {
                 repaint_delay,
                 show_light_markers: light_markers_change,
                 tile_heatmap: tile_heatmap_change,
+                voxel_debug: voxel_debug_change,
             },
         }
     }

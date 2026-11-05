@@ -12,7 +12,7 @@ impl HeatmapPass {
     ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Tile heatmap shader"),
-            source: wgpu::ShaderSource::Wgsl(include_wesl!("heatmap").into()),
+            source: wgpu::ShaderSource::Wgsl(include_wesl!("debug/culling").into()),
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Tile heatmap pipeline layout"),

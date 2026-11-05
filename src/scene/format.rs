@@ -164,7 +164,6 @@ impl SpotLightData {
 }
 
 fn resolve_shadow_bias(shadow_bias: f32, legacy_depth_bias: Option<f32>) -> f32 {
-    // Version 4 stored the final normalized depth offset, while version 5 stores Godot's bias parameter.
     legacy_depth_bias
         .map(|bias| bias * 100.0)
         .unwrap_or(shadow_bias)

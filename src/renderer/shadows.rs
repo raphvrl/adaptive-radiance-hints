@@ -663,7 +663,6 @@ pub fn build_plan(
     let mut spot_tiles = HashMap::with_capacity(spot_lights.len());
     let mut tile_index = 0;
 
-    // Keep this order aligned with the point light face settings and shader face selection.
     let point_faces = [
         (Vec3::X, -Vec3::Y),
         (-Vec3::X, -Vec3::Y),

@@ -122,7 +122,6 @@ fn cull_tiles(
         && global_id.y < cull.viewport_tiles.y;
     if pixel_in_bounds {
         let depth = textureLoad(scene_depth, vec2i(global_id.xy), 0);
-        // Positive depth floats have the same ordering as their u32 bit patterns.
         atomicMin(&tile_min_depth_bits, bitcast<u32>(depth));
         atomicMax(&tile_max_depth_bits, bitcast<u32>(depth));
     }
@@ -151,7 +150,6 @@ fn cull_tiles(
         let light_index = base + lane;
         if light_index < light_buffer.length {
             let light = light_buffer.lights[light_index];
-            // The range sphere conservatively bounds point and spot lights.
             let bounds = projected_sphere(light.position, light.range);
 
             if overlaps_tile(bounds, tile_minimum, tile_maximum, depth_minimum, depth_maximum) {
